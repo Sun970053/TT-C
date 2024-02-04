@@ -62,7 +62,7 @@
 #define PROTOCOL_CFG				0x18
 #define PATCH_IMAGE					0x04
 
-#define MAX_CTS_RETRY				200
+#define MAX_CTS_RETRY				1000
 // microsecond
 #define Si446x_TRANSMIT_TIMEOUT		2000
 #define Si446x_RECEIVE_TIMEOUT		2000
@@ -281,6 +281,7 @@ uint8_t Si446x_set_SyncWords(uint8_t synclen, uint8_t* syncdata);
 uint8_t Si446x_set_CRC(uint8_t crcSeed, uint8_t crcPoly);
 uint8_t Si446x_set_tx_power(uint8_t power);
 uint8_t Si446x_transmit(uint8_t txlen, uint8_t* txdata);
+uint8_t Si446x_receive_init(void);
 uint8_t Si446x_get_chip_status(void);
 uint8_t Si446x_get_func_status(void);
 uint8_t Si446x_get_pckt_handler_status(void);

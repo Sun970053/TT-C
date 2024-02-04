@@ -28,6 +28,8 @@ uint8_t Si446x_FifoReset();
 uint8_t Si446x_TxInterrupt();
 uint8_t Si446x_ClearInterrupt();
 uint8_t Si446x_Start_Tx();
+uint8_t Si446x_Start_Rx();
+uint8_t Si446x_RxInterrupt();
 
 void Delay_us(uint32_t time)
 {
@@ -44,6 +46,7 @@ uint8_t Si446x_init(SPI_HandleTypeDef* hspi)
 	HAL_GPIO_WritePin(SDN_GPIO_Port, SDN_Pin, GPIO_PIN_RESET);
 	// Wait for POR (Power on reset)
 	while(HAL_GPIO_ReadPin(GPIO1_GPIO_Port, GPIO1_Pin) == GPIO_PIN_RESET);
+	//Delay_us(10000);
 	// Start the radio
 	Si446x_Configuration(RF4463_CONFIGURATION_DATA);
 	// setting of GPIO
@@ -55,13 +58,26 @@ uint8_t Si446x_init(SPI_HandleTypeDef* hspi)
 	buff[5] = GPIO_INT_SIGNAL;
 	buff[6] = GPIO_DATA_OUT;
 	if(!Si446x_SendCommand(7, buff)) return 0;
-	if(!Si446x_GetResponse(7, buff)) return 0;
+	//if(!Si446x_GetResponse(7, buff)) return 0;
 	//frequency adjust
 	buff[0] = 98;
 	Si446x_SetProperties(PROPERTY_GLOBAL_XO_TUNE, 1, buff);
 	//
-	buff[0] = 40;
+	buff[0] = 0x40;
 	Si446x_SetProperties(PROPERTY_GLOBAL_CONFIG, 1, buff);
+
+	// set preamble
+	buff[0] = 0x08;
+	buff[1] = 0x14;
+	buff[2] = 0x00;
+	buff[3] = 0x0f;
+	buff[4] = PREAM_FIRST_1|LENGTH_CONFIG_BYTES|STANDARD_PREAM_1010;
+	buff[5] = 0x00;
+	buff[6] = 0x00;
+	buff[7] = 0x00;
+	buff[8] = 0x00;
+	Si446x_SetProperties(PROPERTY_PREAMBLE_TX_LENGTH, 9, buff);
+
 	// get preamble
 	Si446x_GetProperties(PROPERTY_PREAMBLE_TX_LENGTH, 9, buff);
 	// Set SyncWords
@@ -170,8 +186,8 @@ uint8_t Si446x_transmit(uint8_t txlen, uint8_t* txdata)
 {
 	if(!Si446x_FifoReset()) return 0;
 	if(!Si446x_WriteTxDataBuffer(txlen, txdata)) return 0;
-	if(!Si446x_ClearInterrupt()) return 0;
 	if(!Si446x_TxInterrupt()) return 0;
+	if(!Si446x_ClearInterrupt()) return 0;
 	if(!Si446x_Start_Tx()) return 0;
 
 	int counter = 0;
@@ -182,7 +198,27 @@ uint8_t Si446x_transmit(uint8_t txlen, uint8_t* txdata)
 		Delay_us(1000);
 		counter++;
 	}
+	Si446x_init(Si446x_hspi);
+
 	return 0;
+}
+
+uint8_t Si446x_receive_init()
+{
+	uint8_t length = 50;
+	if(!Si446x_SetProperties(PKT_FIELD_2_LENGTH_7_0, sizeof(length), &length)) return 0;
+	if(!Si446x_FifoReset()) return 0;
+	if(!Si446x_RxInterrupt()) return 0;
+	if(!Si446x_ClearInterrupt()) return 0;
+	if(!Si446x_Start_Rx()) return 0;
+	return 1;
+}
+
+uint8_t Si446x_receive(uint8_t rxlen, uint8_t* rxdata)
+{
+	if(!Si446x_ReadRxDataBuffer(rxlen, rxdata)) return 0;
+	if(!Si446x_FifoReset()) return 0;
+	return 1;
 }
 
 uint8_t Si446x_get_chip_status()
@@ -284,55 +320,44 @@ uint8_t Si446x_SendCommand(uint8_t cmdLength, uint8_t* cmdData)
 {
 	HAL_GPIO_WritePin(NSEL_GPIO_Port, NSEL_Pin, GPIO_PIN_RESET);
 	HAL_SPI_Transmit(Si446x_hspi,  cmdData, cmdLength, Si446x_TRANSMIT_TIMEOUT);
-	while (HAL_SPI_GetState(Si446x_hspi) != HAL_SPI_STATE_READY);
+	//while (HAL_SPI_GetState(Si446x_hspi) != HAL_SPI_STATE_READY);
 	HAL_GPIO_WritePin(NSEL_GPIO_Port, NSEL_Pin, GPIO_PIN_SET);
 	return 1;
 }
 
 uint8_t Si446x_WaitforCTS(){
-	uint8_t output_address = READ_CMD_BUFFER;
-	uint8_t CtsValue = 0;
+	uint8_t output_address[2] = {0};
+	uint8_t CtsValue[2] = {0};
 	uint16_t ErrCnt = 0;
 
-	while(CtsValue != 0xFF)
+	while(CtsValue[1] != 0xFF)
 	{
-		HAL_GPIO_WritePin(NSEL_GPIO_Port, NSEL_Pin, GPIO_PIN_RESET);
-		HAL_SPI_Transmit(Si446x_hspi, &output_address, 1, Si446x_TRANSMIT_TIMEOUT);
-		while (HAL_SPI_GetState(Si446x_hspi) != HAL_SPI_STATE_READY);
-		HAL_SPI_Receive(Si446x_hspi, &CtsValue, 1, Si446x_RECEIVE_TIMEOUT);
-		while (HAL_SPI_GetState(Si446x_hspi) != HAL_SPI_STATE_READY);
-		HAL_GPIO_WritePin(NSEL_GPIO_Port, NSEL_Pin, GPIO_PIN_SET);
 		if(++ErrCnt > MAX_CTS_RETRY)
 		{
 			return 0;
 		}
+		output_address[0] = READ_CMD_BUFFER;
+		HAL_GPIO_WritePin(NSEL_GPIO_Port, NSEL_Pin, GPIO_PIN_RESET);
+		//HAL_SPI_Transmit(Si446x_hspi, &output_address, 1, Si446x_TRANSMIT_TIMEOUT);
+		//while (HAL_SPI_GetState(Si446x_hspi) != HAL_SPI_STATE_READY);
+		//HAL_SPI_Receive(Si446x_hspi, &CtsValue, 1, Si446x_RECEIVE_TIMEOUT);
+		//while (HAL_SPI_GetState(Si446x_hspi) != HAL_SPI_STATE_READY);
+		HAL_SPI_TransmitReceive(Si446x_hspi, &output_address[0], &CtsValue[0], 2, 1000);
+		HAL_GPIO_WritePin(NSEL_GPIO_Port, NSEL_Pin, GPIO_PIN_SET);
+
 	}
 	return 1;
 }
 
 uint8_t Si446x_GetResponse(uint8_t RespLength, uint8_t* RespData){
-	uint8_t output_address = READ_CMD_BUFFER;
-	uint8_t CtsValue = 0;
-	uint16_t ErrCnt = 0;
-
-	while(CtsValue != 0XFF)
-	{
-		HAL_GPIO_WritePin(NSEL_GPIO_Port, NSEL_Pin, GPIO_PIN_RESET);
-		HAL_SPI_Transmit(Si446x_hspi, &output_address, 1, Si446x_TRANSMIT_TIMEOUT);
-		while (HAL_SPI_GetState(Si446x_hspi) != HAL_SPI_STATE_READY);
-		HAL_SPI_Receive(Si446x_hspi, &CtsValue, 1, Si446x_RECEIVE_TIMEOUT);
-		while (HAL_SPI_GetState(Si446x_hspi) != HAL_SPI_STATE_READY);
-		if(CtsValue != 0XFF)
-		{
-			HAL_GPIO_WritePin(NSEL_GPIO_Port, NSEL_Pin, GPIO_PIN_SET);
-		}
-		if(++ErrCnt > MAX_CTS_RETRY)
-		{
-			return 0;
-		}
-	}
+	uint8_t output_address[2] = {0};
+	uint8_t CtsValue[2] = {0};
+	output_address[0] = READ_CMD_BUFFER;
+	if (!Si446x_WaitforCTS()) return 0;
+	HAL_GPIO_WritePin(NSEL_GPIO_Port, NSEL_Pin, GPIO_PIN_RESET);
+	HAL_SPI_TransmitReceive(Si446x_hspi, &output_address[0], &CtsValue[0], 2, 1000);
 	HAL_SPI_Receive(Si446x_hspi, RespData, RespLength, Si446x_RECEIVE_TIMEOUT);
-	while (HAL_SPI_GetState(Si446x_hspi) != HAL_SPI_STATE_READY);
+	//while (HAL_SPI_GetState(Si446x_hspi) != HAL_SPI_STATE_READY);
 	HAL_GPIO_WritePin(NSEL_GPIO_Port, NSEL_Pin, GPIO_PIN_SET);
 	return 1;
 }
@@ -383,18 +408,19 @@ uint8_t Si446x_Configuration(uint8_t* configArray)
 	while(configArray[index])
 	{
 		currentNum = configArray[index];
+
 		if(Si446x_SendCommand(currentNum, &configArray[index + 1]) == 0) return 0;
 		if(Si446x_WaitforCTS() == 0) return 0;
-		if(configArray[index + 1] == 0x11)
-		{
-			propertyNum = (configArray[index + 2] << 8) | configArray[index + 4];
-			//printf("Property number: 0x%04x\r\n", propertyNum);
-		}
-		else
-		{
-			propertyNum = configArray[index + 1];
-			//printf("Command number: 0x%02x\r\n", propertyNum);
-		}
+//		if(configArray[index + 1] == 0x11)
+//		{
+//			propertyNum = (configArray[index + 2] << 8) | configArray[index + 4];
+//			//printf("Property number: 0x%04x\r\n", propertyNum);
+//		}
+//		else
+//		{
+//			propertyNum = configArray[index + 1];
+//			//printf("Command number: 0x%02x\r\n", propertyNum);
+//		}
 
 		index = index + currentNum + 1;
 	}
@@ -484,6 +510,33 @@ uint8_t Si446x_Start_Tx()
 	buff[1] = 0x00;
 	// tx complete state
 	buff[2] = (uint8_t)(READY_STATE << 4);
+	if(Si446x_SendCommand(sizeof(buff), buff)  == 0) return 0;
+	if(Si446x_WaitforCTS() == 0) return 0;
+	return 1;
+}
+
+uint8_t Si446x_RxInterrupt()
+{
+	uint8_t buff[4] = {0};
+	buff[0] = MODEM_INT_STATUS_EN;
+	buff[1] = PACKET_RX_EN | CRC_ERROR_EN;
+	buff[2] = 0x00;
+	buff[3] = CHIP_READY_EN;
+	return Si446x_SetProperties(PROPERTY_INT_CTL_ENABLE, sizeof(buff), buff);
+}
+
+uint8_t Si446x_Start_Rx()
+{
+	uint8_t buff[8] = {0};
+	buff[0] = START_RX;
+	buff[1] = 0;
+	buff[2] = 0;
+	buff[3] = 0;
+	buff[4] = 0;
+	buff[5] = 0;
+	buff[6] = 0x08;
+	buff[7] = 0x08;
+
 	if(Si446x_SendCommand(sizeof(buff), buff)  == 0) return 0;
 	if(Si446x_WaitforCTS() == 0) return 0;
 	return 1;
