@@ -8,10 +8,10 @@
 #ifndef INC_SI4463_H_
 #define INC_SI4463_H_
 
+#include <radio_config_Si4463_prev.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include "radio_config_Si4463.h"
 
 /* Define section */
 

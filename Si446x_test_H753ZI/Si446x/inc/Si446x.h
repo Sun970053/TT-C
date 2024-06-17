@@ -8,12 +8,12 @@
 #ifndef INC_SI446X_H_
 #define INC_SI446X_H_
 
+#include "radio_config_Si4463_b1.h"
 #include "stm32h7xx_hal.h"
 #include "main.h"
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include "radio_config_Si4463.h"
 
 /* Boot Commands */
 #define POWER_UP					0x02
@@ -62,7 +62,7 @@
 #define PROTOCOL_CFG				0x18
 #define PATCH_IMAGE					0x04
 
-#define MAX_CTS_RETRY				1000
+#define MAX_CTS_RETRY				2000
 // microsecond
 #define Si446x_TRANSMIT_TIMEOUT		2000
 #define Si446x_RECEIVE_TIMEOUT		2000
@@ -289,4 +289,8 @@ uint8_t Si446x_get_modem_status(void);
 uint8_t Si446x_get_fifo_info(void);
 uint8_t Si446x_request_device_state(void);
 uint8_t Si446x_change_state(void);
+uint8_t* Si446x_nrzi_encode(uint8_t* input, uint8_t len);
+uint8_t* Si446x_nrzi_decode(uint8_t* input, uint8_t len);
+uint8_t* Si446x_g3ruh_scrambler(uint8_t* input, uint8_t len);
+uint8_t* Si446x_g3ruh_descrambler(uint8_t* input, uint8_t len);
 #endif /* INC_SI446X_H_ */

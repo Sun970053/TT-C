@@ -40,93 +40,97 @@ void Delay_us(uint32_t time)
 uint8_t Si446x_init(SPI_HandleTypeDef* hspi)
 {
 	uint8_t buff[12] = {0};
-	Si446x_hspi = hspi;
-	HAL_GPIO_WritePin(SDN_GPIO_Port, SDN_Pin, GPIO_PIN_SET);
-	Delay_us(10);
-	HAL_GPIO_WritePin(SDN_GPIO_Port, SDN_Pin, GPIO_PIN_RESET);
-	// Wait for POR (Power on reset)
-	while(HAL_GPIO_ReadPin(GPIO1_GPIO_Port, GPIO1_Pin) == GPIO_PIN_RESET);
-	//Delay_us(10000);
-	// Start the radio
-	Si446x_Configuration(RF4463_CONFIGURATION_DATA);
-	// setting of GPIO
-	buff[0] = GPIO_PIN_CFG;
-	buff[1] = GPIO_NO_CHANGE;
-	buff[2] = GPIO_NO_CHANGE;
-	buff[3] = GPIO_RX_STATE;
-	buff[4] = GPIO_TX_STATE;
-	buff[5] = GPIO_INT_SIGNAL;
-	buff[6] = GPIO_DATA_OUT;
-	if(!Si446x_SendCommand(7, buff)) return 0;
-	//if(!Si446x_GetResponse(7, buff)) return 0;
-	//frequency adjust
-	buff[0] = 98;
-	Si446x_SetProperties(PROPERTY_GLOBAL_XO_TUNE, 1, buff);
-	//
-	buff[0] = 0x40;
-	Si446x_SetProperties(PROPERTY_GLOBAL_CONFIG, 1, buff);
+		Si446x_hspi = hspi;
+		HAL_GPIO_WritePin(SDN_GPIO_Port, SDN_Pin, GPIO_PIN_SET);
+		Delay_us(10);
+		HAL_GPIO_WritePin(SDN_GPIO_Port, SDN_Pin, GPIO_PIN_RESET);
+		// Wait for POR (Power on reset)
+		while(HAL_GPIO_ReadPin(GPIO1_GPIO_Port, GPIO1_Pin) == GPIO_PIN_RESET);
+		//Delay_us(10000);
+		// Start the radio
+		Si446x_Configuration(RF4463_CONFIGURATION_DATA);
+		// setting of GPIO
+		buff[0] = GPIO_PIN_CFG;
+		buff[1] = GPIO_NO_CHANGE;
+		buff[2] = GPIO_NO_CHANGE;
+		buff[3] = GPIO_RX_STATE;
+		buff[4] = GPIO_TX_STATE;
+		buff[5] = GPIO_INT_SIGNAL;
+		buff[6] = GPIO_DATA_OUT;
+		if(!Si446x_SendCommand(7, buff)) return 0;
+		//if(!Si446x_GetResponse(7, buff)) return 0;
+		//frequency adjust
+//		buff[0] = 82;
+//		Si446x_SetProperties(PROPERTY_GLOBAL_XO_TUNE, 1, buff);
+//		//
+//		buff[0] = 0x40;
+//		Si446x_SetProperties(PROPERTY_GLOBAL_CONFIG, 1, buff);
 
-	// set preamble
-	buff[0] = 0x08;
-	buff[1] = 0x14;
-	buff[2] = 0x00;
-	buff[3] = 0x0f;
-	buff[4] = PREAM_FIRST_1|LENGTH_CONFIG_BYTES|STANDARD_PREAM_1010;
-	buff[5] = 0x00;
-	buff[6] = 0x00;
-	buff[7] = 0x00;
-	buff[8] = 0x00;
-	Si446x_SetProperties(PROPERTY_PREAMBLE_TX_LENGTH, 9, buff);
+		// set preamble
+//		buff[0] = 0x08;
+//		buff[1] = 0x14;
+//		buff[2] = 0x00;
+//		buff[3] = 0x0f;
+//		buff[4] = PREAM_FIRST_1|LENGTH_CONFIG_BYTES|STANDARD_PREAM_1010;
+//		buff[5] = 0x00;
+//		buff[6] = 0x00;
+//		buff[7] = 0x00;
+//		buff[8] = 0x00;
+//		Si446x_SetProperties(PROPERTY_PREAMBLE_TX_LENGTH, 9, buff);
 
-	// get preamble
-	Si446x_GetProperties(PROPERTY_PREAMBLE_TX_LENGTH, 9, buff);
-	// Set SyncWords
-	buff[0] = 0x2D;
-	buff[1] = 0xD4;
-	Si446x_set_SyncWords(2, buff);
-	// Set CRC
-	buff[0] = CRC_SEED_ALL_1S | ITU_T_CRC8;
-	Si446x_SetProperties(PROPERTY_PKT_CRC_CONFIG, 1, buff);
-	buff[0] = CRC_BIG_ENDIAN;
-	Si446x_SetProperties(PROPERTY_PKT_CONFIG_1, 1, buff);
+		// get preamble
+		Si446x_GetProperties(PROPERTY_PREAMBLE_TX_LENGTH, 9, buff);
+		// Set SyncWords
+//		buff[0] = 0x7E;
+//		buff[1] = 0x7E;
+//		Si446x_set_SyncWords(2, buff);
+		// Set CRC
+//		buff[0] = CRC_SEED_ALL_1S | CCIT_16;
+//		Si446x_SetProperties(PROPERTY_PKT_CRC_CONFIG, 1, buff);
+//		buff[0] = CRC_BIG_ENDIAN;
+//		Si446x_SetProperties(PROPERTY_PKT_CONFIG_1, 1, buff);
 
-	// Set Pckt
-	buff[0] = PKT_IN_FIFO | DST_FIELD_ENUM_2;
-	buff[1] = SRC_FIELD_ENUM_1;
-	buff[2] = 0x00;
-	Si446x_SetProperties(PROPERTY_PKT_LEN, 3, buff);
+		// Set Pckt
+//		buff[0] = PKT_IN_FIFO | DST_FIELD_ENUM_2;
+//		buff[1] = SRC_FIELD_ENUM_1;
+//		buff[2] = 0x00;
+//		Si446x_SetProperties(PROPERTY_PKT_LEN, 3, buff);
 
-	//set length of field, set field 2 as data field.
-	buff[0] = 0x00;
-	buff[1] = 0x01;
-	buff[2] = FIELD_CONFIG_PN_START;
-	buff[3] = FIELD_CRC_CONFIG_CRC32_START | FIELD_CRC_CONFIG_SEND_CRC32 |
-			FIELD_CRC_CONFIG_CHECK_CRC32 | FIELD_CRC_CONFIG_CRC32_ENABLE;
-	buff[4] = 0x00;
-	buff[5] = 50;
-	buff[6] = FIELD_CONFIG_PN_START;
-	buff[7] = FIELD_CRC_CONFIG_CRC32_START | FIELD_CRC_CONFIG_SEND_CRC32 |
-			FIELD_CRC_CONFIG_CHECK_CRC32 | FIELD_CRC_CONFIG_CRC32_ENABLE;
-	buff[8] = 0x00;
-	buff[9] = 0x00;
-	buff[10] = 0x00;
-	buff[11] = 0x00;
-	Si446x_SetProperties(PKT_FIELD_1_LENGTH_12_8, 12, buff);
+		//set length of field, set field 2 as data field.
+//		buff[0] = 0x00;
+//		buff[1] = 0x01;
+//		buff[2] = FIELD_CONFIG_PN_START;
+//		buff[3] = FIELD_CRC_CONFIG_CRC32_START | FIELD_CRC_CONFIG_SEND_CRC32 |
+//				FIELD_CRC_CONFIG_CHECK_CRC32 | FIELD_CRC_CONFIG_CRC32_ENABLE;
+//		buff[2] = 0x00;
+//		buff[3] = 0x00;
+//		buff[4] = 0x00;
+//		buff[5] = 50;
+//		buff[6] = FIELD_CONFIG_PN_START;
+//		buff[7] = FIELD_CRC_CONFIG_CRC32_START | FIELD_CRC_CONFIG_SEND_CRC32 |
+//				FIELD_CRC_CONFIG_CHECK_CRC32 | FIELD_CRC_CONFIG_CRC32_ENABLE;
+//		buff[6] = 0x00;
+//		buff[7] = 0x00;
+//		buff[8] = 0x00;
+//		buff[9] = 0x00;
+//		buff[10] = 0x00;
+//		buff[11] = 0x00;
+//		Si446x_SetProperties(PKT_FIELD_1_LENGTH_12_8, 12, buff);
+//
+//		buff[0] = 0x00;
+//		buff[1] = 0x00;
+//		buff[2] = 0x00;
+//		buff[3] = 0x00;
+//		buff[4] = 0x00;
+//		buff[5] = 0x00;
+//		buff[6] = 0x00;
+//		buff[7] = 0x00;
+//		Si446x_SetProperties(PKT_FIELD_4_LENGTH_12_8, 8, buff);
 
-	buff[0] = 0x00;
-	buff[1] = 0x00;
-	buff[2] = 0x00;
-	buff[3] = 0x00;
-	buff[4] = 0x00;
-	buff[5] = 0x00;
-	buff[6] = 0x00;
-	buff[7] = 0x00;
-	Si446x_SetProperties(PKT_FIELD_4_LENGTH_12_8, 8, buff);
+		//set tx power
+		Si446x_set_tx_power(20);
 
-	//set tx power
-	Si446x_set_tx_power(127);
-
-	return 1;
+		return 1;
 }
 
 uint8_t Si446x_power_on_reset(void)
@@ -156,7 +160,7 @@ uint8_t Si446x_enter_standby_mode(void)
 
 uint8_t Si446x_set_SyncWords(uint8_t synclen, uint8_t* syncdata)
 {
-	uint8_t buff[6] = {0};
+	uint8_t buff[5] = {0};
 	buff[0] = SYNC_LENGTH_MASK & (synclen - 1);
 	memcpy(&buff[1], syncdata, synclen);
 	return Si446x_SetProperties(PROPERTY_SYNC_CONFIG, synclen + 1, buff);
@@ -411,16 +415,16 @@ uint8_t Si446x_Configuration(uint8_t* configArray)
 
 		if(Si446x_SendCommand(currentNum, &configArray[index + 1]) == 0) return 0;
 		if(Si446x_WaitforCTS() == 0) return 0;
-//		if(configArray[index + 1] == 0x11)
-//		{
-//			propertyNum = (configArray[index + 2] << 8) | configArray[index + 4];
-//			//printf("Property number: 0x%04x\r\n", propertyNum);
-//		}
-//		else
-//		{
-//			propertyNum = configArray[index + 1];
-//			//printf("Command number: 0x%02x\r\n", propertyNum);
-//		}
+		if(configArray[index + 1] == 0x11)
+		{
+			propertyNum = (configArray[index + 2] << 8) | configArray[index + 4];
+			printf("Property number: 0x%04x\r\n", propertyNum);
+		}
+		else
+		{
+			propertyNum = configArray[index + 1];
+			printf("Command number: 0x%02x\r\n", propertyNum);
+		}
 
 		index = index + currentNum + 1;
 	}
@@ -540,4 +544,90 @@ uint8_t Si446x_Start_Rx()
 	if(Si446x_SendCommand(sizeof(buff), buff)  == 0) return 0;
 	if(Si446x_WaitforCTS() == 0) return 0;
 	return 1;
+}
+
+uint8_t* Si446x_nrzi_encode(uint8_t* input, uint8_t len)
+{
+	uint8_t* output = (uint8_t*)malloc(len*sizeof(uint8_t));
+	uint8_t  nrz, nrzi, prevnrzi = 0;
+	for(int i = 0; i < len; i++)
+	{
+		for(int j = 0; j < 8; j++)
+		{
+			nrz = (input[i] >> j) & 0x01;
+			if(nrz)
+				nrzi = prevnrzi;
+			else
+				nrzi = ~prevnrzi;
+
+			if(nrzi)
+				output[i] |= (1 << j);
+			else
+				output[i] &= ~(1 << j);
+			prevnrzi = nrzi;
+		}
+	}
+	return output;
+}
+
+uint8_t* Si446x_nrzi_decode(uint8_t* input, uint8_t len)
+{
+	uint8_t* output = (uint8_t*)malloc(len*sizeof(uint8_t));
+	uint8_t nrz, nrzi, prevnrzi = 0;
+	for(int i = 0; i < len; i++)
+	{
+		for(int j = 0; j < 8; j++)
+		{
+			nrzi = (input[i] >> j) & 0x01;
+			nrz = (~(nrzi ^ prevnrzi)) & 0x01;
+			if(nrz)
+				output[i] |= (1 << j);
+			else
+				output[i] &= ~(1 << j);
+			prevnrzi = nrzi;
+		}
+	}
+	return output;
+}
+
+uint8_t* Si446x_g3ruh_scrambler(uint8_t* input, uint8_t len)
+{
+	uint8_t* output = (uint8_t*)malloc(len*sizeof(uint8_t));
+	uint8_t unscrambled_bit, scrambled_bit;
+	uint32_t LFSR = 0;
+	for(int i = 0; i < len; i++)
+	{
+		for(int j = 0; j < 8; j++)
+		{
+			unscrambled_bit = (input[i] >> j) & 0x01;
+			scrambled_bit = ((LFSR >> 11) & 0x01) ^ ((LFSR >> 16) & 0x01) ^ unscrambled_bit;
+			if(scrambled_bit)
+				output[i] |= (1 << j);
+			else
+				output[i] &= ~(1 << j);
+			LFSR = (LFSR << 1) | scrambled_bit;
+		}
+	}
+	return output;
+}
+
+uint8_t* Si446x_g3ruh_descrambler(uint8_t* input, uint8_t len)
+{
+	uint8_t* output = (uint8_t*)malloc(len*sizeof(uint8_t));
+	uint8_t unscrambled_bit, scrambled_bit;
+	uint32_t LFSR = 0;
+	for(int i = 0; i < len; i++)
+	{
+		for(int j = 0; j < 8; j++)
+		{
+			scrambled_bit = (input[i] >> j) & 0x01;
+			unscrambled_bit = ((LFSR >> 11) & 0x01) ^ ((LFSR >> 16) & 0x01) ^ scrambled_bit;
+			if(unscrambled_bit)
+				output[i] |= (1 << j);
+			else
+				output[i] &= ~(1 << j);
+			LFSR = (LFSR << 1) | scrambled_bit;
+		}
+	}
+	return output;
 }

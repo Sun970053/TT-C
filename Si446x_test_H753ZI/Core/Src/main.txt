@@ -21,12 +21,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>
-#include <stdint.h>
-#include <stdbool.h>
 #include <string.h>
-#include "si4463_huang.h"
-#include "ax25_huang.h"
+#include "Si446x.h"
+#include "AX25.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -63,8 +60,7 @@ PUTCHAR_PROTOTYPE
 	return ch;
 }
 
-si4463_t si4463;
-bool txFlag = false;
+uint8_t flag = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -74,15 +70,7 @@ static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
-uint8_t si4463_SPI_Write(uint8_t* pTxData, uint8_t dataLen, uint32_t timeout);
-uint8_t si4463_SPI_Read(uint8_t* pRxData, uint8_t dataLen, uint32_t timeout);
-uint8_t si4463_SPI_WriteRead(uint8_t* pTxData, uint8_t* pRxData, uint8_t dataLen, uint32_t timeout);
-uint8_t si4463_SPI_CheckState(void);
-void si4463_DelayUs(uint32_t delay);
-void si4463_setNSEL(bool val);
-void si4463_setSDN(bool val);
-bool si4463_getIRQ(void);
-bool si4463_getGPIO1(void);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -92,27 +80,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	if(GPIO_Pin == B1_Pin)
 	{
 		printf("interrupt\r\n");
-		txFlag = true;
 		//HAL_GPIO_WritePin(GPIO1_GPIO_Port, GPIO1_Pin, GPIO_PIN_SET);
+		flag = 1;
 	}
 }
-
-// Assumes little endian
-void printBits(size_t const size, void const * const ptr)
-{
-    unsigned char *b = (unsigned char*) ptr;
-    unsigned char byte;
-    int i, j;
-
-    for (i = size-1; i >= 0; i--) {
-        for (j = 7; j >= 0; j--) {
-            byte = (b[i] >> j) & 1;
-            printf("%u", byte);
-        }
-        printf(" ");
-    }
-}
-
 /* USER CODE END 0 */
 
 /**
@@ -148,51 +119,60 @@ int main(void)
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
 	HAL_TIM_Base_Start(&htim1); // us delay timer
-
-	si4463.SPI_Write = si4463_SPI_Write;
-	si4463.SPI_Read = si4463_SPI_Read;
-	si4463.SPI_WriteRead = si4463_SPI_WriteRead;
-	si4463.SPI_CheckState = si4463_SPI_CheckState;
-	si4463.spi_state_ready = HAL_SPI_STATE_READY;
-	si4463.DelayUs = si4463_DelayUs;
-	si4463.NSEL = si4463_setNSEL;
-	si4463.SDN = si4463_setSDN;
-	si4463.gpios.IRQ = si4463_getIRQ;
-	si4463.gpios.GPIO1 = si4463_getGPIO1;
-	si4463.gpios.gpio_low = GPIO_PIN_RESET;
-	si4463.gpios.gpio_high = GPIO_PIN_SET;
-
-
-	/* Initialize si4463 */
-	int res = si4463_init(&si4463);
-	if(res == SI4463_OK)
-		printf("Si4463 init .. ok !\r\n");
+	HAL_Delay(50);
+	if(Si446x_init(&hspi1))
+		printf("Init.. ok!\r\n");
 	else
-		printf("Si4463 init .. fail ! error code: %d\r\n", res);
+		printf("Init.. fail!\r\n");
 
-	uint8_t control = RADIOLIB_AX25_CONTROL_U_UNNUMBERED_INFORMATION | RADIOLIB_AX25_CONTROL_POLL_FINAL_DISABLED | RADIOLIB_AX25_CONTROL_UNNUMBERED_FRAME;
-	ax25frame_t* ax25frame = createAX25Frame("NJ7P", 0, "N7LEM", 0, control, RADIOLIB_AX25_PID_NO_LAYER_3, (uint8_t*)"Hello World!", strlen("Hello World!"), 8);
-	uint16_t* txLen = NULL;
-	uint8_t* txData = AX25Frame_HDLC_Generator(ax25frame, txLen);
+	if(Si446x_part_info())
+		printf("Get.. ok!\r\n");
+	else
+		printf("Get.. fail!\r\n");
 
-	ax25_g3ruh_scrambler_init(0x21000UL);
-	ax25_g3ruh_scrambler(txData, txData, *txLen);
+	if(Si446x_get_func_status())
+		printf("Func.. ok!\r\n");
+	else
+		printf("Func.. fail!\r\n");
+
+	if(Si446x_enter_standby_mode())
+		printf("stand by.. ok!\r\n");
+	else
+		printf("stand by.. fail!\r\n");
+
+	char* payload = "Hello World!";
+  char* sourcecallsign = "N7LEM";
+  uint8_t sourceSSID = 0;
+  char* destcallsign = "NJ7P";
+  uint8_t destSSID = 0;
+
+  // create control field
+  uint8_t controlField = RADIOLIB_AX25_CONTROL_U_UNNUMBERED_INFORMATION | RADIOLIB_AX25_CONTROL_POLL_FINAL_DISABLED | RADIOLIB_AX25_CONTROL_UNNUMBERED_FRAME;
+
+  // build the frame
+  AX25Frame_t* ax25frame = createAX25Frame(destcallsign, destSSID, sourcecallsign, sourceSSID, controlField, RADIOLIB_AX25_PID_NO_LAYER_3, (uint8_t*)payload, strlen(payload));
+  
+  // begin AX25 Client
+  AX25Client_t* ax25client = beginAX25Client(sourcecallsign, sourceSSID, 8);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if(txFlag)
+	  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+	  HAL_Delay(200);
+	  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+	  HAL_Delay(200);
+	  if(flag == 1)
 	  {
-		  res = si4463_transmit(&si4463, txData, *txLen, NO_CHANGE);
-		  if(res == SI4463_OK)
-			  printf("Si4463 Transmit .. ok !\r\n");
+		  if(sendFrame(ax25frame, ax25client) == RADIOLIB_ERR_NONE)
+			  printf("transmit.. ok!\r\n");
 		  else
-			  printf("Si4463 Transmit .. fail ! error code: %d\r\n", res);
-		  txFlag = false;
+			  printf("transmit.. fail!\r\n");
+		  Si446x_enter_standby_mode();
+		  flag = 0;
 	  }
-
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -495,57 +475,7 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-uint8_t si4463_SPI_Write(uint8_t* pTxData, uint8_t dataLen, uint32_t timeout)
-{
-	return HAL_SPI_Transmit(&hspi1, pTxData, dataLen, timeout);
-}
 
-uint8_t si4463_SPI_Read(uint8_t* pRxData, uint8_t dataLen, uint32_t timeout)
-{
-	return HAL_SPI_Receive(&hspi1, pRxData, dataLen, timeout);
-}
-
-uint8_t si4463_SPI_WriteRead(uint8_t* pTxData, uint8_t* pRxData, uint8_t dataLen, uint32_t timeout)
-{
-	return HAL_SPI_TransmitReceive(&hspi1, pTxData, pRxData, dataLen, timeout);
-}
-
-uint8_t si4463_SPI_CheckState(void)
-{
-	return HAL_SPI_GetState(&hspi1);
-}
-
-void si4463_DelayUs(uint32_t delay)
-{
-	__HAL_TIM_SET_COUNTER(&htim1, 0);
-	while((__HAL_TIM_GET_COUNTER(&htim1)) < delay);
-}
-
-void si4463_setNSEL(bool val)
-{
-	if(val == true)
-		HAL_GPIO_WritePin(NSEL_GPIO_Port, NSEL_Pin, GPIO_PIN_SET);
-	else
-		HAL_GPIO_WritePin(NSEL_GPIO_Port, NSEL_Pin, GPIO_PIN_RESET);
-}
-
-void si4463_setSDN(bool val)
-{
-	if(val == true)
-		HAL_GPIO_WritePin(SDN_GPIO_Port, SDN_Pin, GPIO_PIN_SET);
-	else
-		HAL_GPIO_WritePin(SDN_GPIO_Port, SDN_Pin, GPIO_PIN_RESET);
-}
-
-bool si4463_getIRQ(void)
-{
-	return HAL_GPIO_ReadPin(IRQ_GPIO_Port, IRQ_Pin);
-}
-
-bool si4463_getGPIO1(void)
-{
-	return HAL_GPIO_ReadPin(GPIO1_GPIO_Port, GPIO1_Pin);
-}
 /* USER CODE END 4 */
 
 /**
