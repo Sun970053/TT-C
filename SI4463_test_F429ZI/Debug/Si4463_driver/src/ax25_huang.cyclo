@@ -1,0 +1,8 @@
+../Si4463_driver/src/ax25_huang.c:20:14:createAX25Frame	2
+../Si4463_driver/src/ax25_huang.c:63:6:deleteAX25Frame	2
+../Si4463_driver/src/ax25_huang.c:73:10:AX25Frame_HDLC_Generator	29
+../Si4463_driver/src/ax25_huang.c:268:10:reflect	2
+../Si4463_driver/src/ax25_huang.c:276:10:checksum	6
+../Si4463_driver/src/ax25_huang.c:304:6:ax25_nrzi_encode	5
+../Si4463_driver/src/ax25_huang.c:332:6:ax25_g3ruh_scrambler_init	3
+../Si4463_driver/src/ax25_huang.c:350:6:ax25_g3ruh_scrambler	5
