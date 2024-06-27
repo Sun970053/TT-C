@@ -181,17 +181,17 @@ int main(void)
 
 	res = si4463_setFrequency(&si4463, 434000000);
 
-	res = si4463_setTxModulation(&si4463, MOD_2FSK);
+	res = si4463_setTxModulation(&si4463, MOD_2GFSK);
 
-	res = si4463_setTxDataRate(&si4463, DR_1200);
+	res = si4463_setTxDataRate(&si4463, DR_9600);
 
 	uint8_t control = RADIOLIB_AX25_CONTROL_U_UNNUMBERED_INFORMATION | RADIOLIB_AX25_CONTROL_POLL_FINAL_DISABLED | RADIOLIB_AX25_CONTROL_UNNUMBERED_FRAME;
 	ax25frame_t* ax25frame = createAX25Frame("STARL", 0, "NCKU", 0, control, RADIOLIB_AX25_PID_NO_LAYER_3, (uint8_t*)"What is 'X' SATORO ?", strlen("What is 'X' SATORO ?"), 8);
 	uint16_t txLen = 0;
 	uint8_t* txData = AX25Frame_HDLC_Generator(ax25frame, &txLen);
 
-//	ax25_g3ruh_scrambler_init(0x21000UL);
-//	ax25_g3ruh_scrambler(txData, txData, txLen);
+	ax25_g3ruh_scrambler_init(0x21000UL);
+	ax25_g3ruh_scrambler(txData, txData, txLen);
   /* USER CODE END 2 */
 
   /* Infinite loop */

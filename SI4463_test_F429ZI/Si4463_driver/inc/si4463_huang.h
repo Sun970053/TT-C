@@ -222,6 +222,15 @@ typedef enum
     CRC_16_DNP
 } si4463_crc_poly;
 
+//#define PROP_MODEM_TX_NCO_MODE          0x2006
+//Sets the oversampling ratio of the internal NCO clock signal used to synthesize the Gaussian filtered modulation waveform. This field is only effective in GFSK mode.
+typedef enum
+{
+    OVERSAMPLING_RATIO_10,
+    OVERSAMPLING_RATIO_40,
+    OVERSAMPLING_RATIO_20,
+} si4463_txosr;
+
 //#define PROP_MODEM_CLKGEN_BAND          0x2051
 typedef enum
 {
@@ -263,6 +272,7 @@ typedef enum
 #define SI4463_ERR_BAD_PARAM             (-50)
 #define SI4463_ERR_INVALID_MOD           (-51)
 #define SI4463_ERR_INVALID_DR            (-52)
+#define SI4463_ERR_INVALID_TXOSR         (-53)
 #define SI4463_ERR_CHIP_VERSION          (-127)
 
 /* Data rate */
@@ -360,6 +370,15 @@ typedef struct
     uint8_t                     outdiv;
 } si4463_freq_t;
 
+/* Data rate config */
+typedef struct
+{
+    uint32_t modemDataRate;
+    uint32_t modemTxNCOMode;
+    si4463_txosr TxOSR;
+} si4463_data_rate_t;
+
+
 typedef struct
 {
     si4463_mod_type             txMod;
@@ -374,6 +393,12 @@ typedef struct
     bool                        crcSeed;
 
 } si4463_setting_t;
+
+typedef struct
+{
+    int8_t currentRSSI;
+    int8_t latchRSSI;
+} si4463_status_t;
 
 
 typedef struct
@@ -391,7 +416,9 @@ typedef struct
     si4463_part_info_t          partInfo;
     si4463_func_info_t          funInfo;
     si4463_freq_t               freq;
+    si4463_data_rate_t          dr;
     si4463_setting_t            settings;
+    si4463_status_t             status;
 } si4463_t;
 
 int8_t si4463_powerOnReset(si4463_t* si4463);
@@ -401,8 +428,8 @@ int8_t si4463_getPartInfo(si4463_t* si4463);
 int8_t si4463_getFuncInfo(si4463_t* si4463);
 int16_t si4463_getTxFifoInfo(si4463_t* si4463);
 int16_t si4463_getRxFifoInfo(si4463_t* si4463);
-int16_t si4463_getCurrentRSSI(si4463_t* si4463);
-int16_t si4463_getLatchRSSI(si4463_t* si4463);
+int8_t si4463_getCurrentRSSI(si4463_t* si4463);
+int8_t si4463_getLatchRSSI(si4463_t* si4463);
 int8_t si4463_clearTxFifo(si4463_t* si4463);
 int8_t si4463_clearRxFifo(si4463_t* si4463);
 int8_t si4463_clearInterrupts(si4463_t* si4463);
@@ -412,20 +439,20 @@ int8_t si4463_transmit(si4463_t* si4463, uint8_t* txData, uint8_t txDataLen, si4
 int8_t si4463_initRx(si4463_t* si4463, uint16_t dataLen, si4463_state nextStateAfterTimeOut, si4463_state nextStateAfterValid, si4463_state nextStateAfterInvalid);
 int8_t si4463_receive(si4463_t* si4463, uint8_t* rxData, uint8_t rxDataLen);
 int8_t si4463_setTxPower(si4463_t* si4463, uint8_t power);
+int8_t si4463_getTxPower(si4463_t* si4463);
 int8_t si4463_setPreamble(si4463_t* si4463, uint8_t preambleLen);
+int16_t si4463_getPreamble(si4463_t* si4463);
 int8_t si4463_setSyncWords(si4463_t* si4463, uint8_t* syncdata, uint8_t syncLen);
+int8_t si4463_getSyncWords(si4463_t* si4463);
 int8_t si4463_setCRC(si4463_t* si4463, bool crcSeed, si4463_crc_poly crcPoly);
+int8_t si4463_getCRC(si4463_t* si4463);
 int8_t si4463_setFrequency(si4463_t* si4463, uint32_t freq);
+int32_t si4463_getFrequency(si4463_t* si4463);
 int8_t si4463_setTxModulation(si4463_t* si4463, si4463_mod_type mod);
 int8_t si4463_setRxModulation(si4463_t* si4463, si4463_mod_type mod);
+int8_t si4463_getModulation(si4463_t* si4463);
 int8_t si4463_setTxDataRate(si4463_t* si4463, si4463_data_rate dataRate);
 int8_t si4463_setRxDataRate(si4463_t* si4463, si4463_data_rate dataRate);
-int8_t si4463_getTxPower(si4463_t* si4463);
-int16_t si4463_getPreamble(si4463_t* si4463);
-int16_t si4463_getSyncWords(si4463_t* si4463);
-int16_t si4463_getCRC(si4463_t* si4463);
-int32_t si4463_getFrequency(si4463_t* si4463);
-int8_t si4463_getModulation(si4463_t* si4463);
 int16_t si4463_getDataRate(si4463_t* si4463);
 int8_t si4463_enterStandbyMode(void);
 

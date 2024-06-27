@@ -31,7 +31,8 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  C:/Users/e1406/Documents/STM32CubeIDE/workspace_1.11.2/SI4463_test_F429ZI/Si4463_driver/inc/si4463_huang.h \
  C:/Users/e1406/Documents/STM32CubeIDE/workspace_1.11.2/SI4463_test_F429ZI/Si4463_driver/inc/radio_config_Si4463_GMSK_9600.h \
  C:/Users/e1406/Documents/STM32CubeIDE/workspace_1.11.2/SI4463_test_F429ZI/Si4463_driver/inc/radio_config_selection.h \
- C:/Users/e1406/Documents/STM32CubeIDE/workspace_1.11.2/SI4463_test_F429ZI/Si4463_driver/inc/ax25_huang.h
+ C:/Users/e1406/Documents/STM32CubeIDE/workspace_1.11.2/SI4463_test_F429ZI/Si4463_driver/inc/ax25_huang.h \
+ C:/Users/e1406/Documents/STM32CubeIDE/workspace_1.11.2/SI4463_test_F429ZI/HashTable/inc/HashTable.h
 ../Core/Inc/main.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h:
 ../Core/Inc/stm32f4xx_hal_conf.h:
@@ -66,3 +67,4 @@ C:/Users/e1406/Documents/STM32CubeIDE/workspace_1.11.2/SI4463_test_F429ZI/Si4463
 C:/Users/e1406/Documents/STM32CubeIDE/workspace_1.11.2/SI4463_test_F429ZI/Si4463_driver/inc/radio_config_Si4463_GMSK_9600.h:
 C:/Users/e1406/Documents/STM32CubeIDE/workspace_1.11.2/SI4463_test_F429ZI/Si4463_driver/inc/radio_config_selection.h:
 C:/Users/e1406/Documents/STM32CubeIDE/workspace_1.11.2/SI4463_test_F429ZI/Si4463_driver/inc/ax25_huang.h:
+C:/Users/e1406/Documents/STM32CubeIDE/workspace_1.11.2/SI4463_test_F429ZI/HashTable/inc/HashTable.h:

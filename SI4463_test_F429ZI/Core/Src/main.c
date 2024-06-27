@@ -28,6 +28,7 @@
 #include <string.h>
 #include "si4463_huang.h"
 #include "ax25_huang.h"
+#include "HashTable.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,6 +43,34 @@
 #else
   #define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
 #endif /* __GNUC__ */
+
+#define CMD_HELP                (0)
+#define CMD_RESET               (1)
+#define CMD_INIT                (2)
+#define CMD_NOP                 (3)
+#define CMD_TX                  (11)
+#define CMD_CONTINUE_TX         (15)
+#define CMD_RX                  (12)
+#define CMD_GET                 (50)
+#define CMD_SET                 (51)
+#define PARAM_PART              (4)
+#define PARAM_FUNC              (5)
+#define PARAM_CURRSSI           (6)
+#define PARAM_LATRSSI           (7)
+#define PARAM_INTS              (10)
+#define PARAM_TXPWR             (13)
+#define PARAM_PREAMBLE          (14)
+#define PARAM_SYNCWORD          (20)
+#define PARAM_CRC               (30)
+#define PARAM_FREQUENCY         (31)
+#define PARAM_MODULATION        (32)
+#define PARAM_DATARATE          (33)
+#define PARAM_CRC_POLY          (34)
+#define PARAM_CRC_SEED          (35)
+#define PARAM_TX_MODULATION     (36)
+#define PARAM_RX_MODULATION     (37)
+#define PARAM_TX_DATARATE       (38)
+#define PARAM_RX_DATARATE       (39)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -63,8 +92,28 @@ PUTCHAR_PROTOTYPE
 	return ch;
 }
 
+/* -----si4463----- */
 si4463_t si4463;
 bool irqFlag = false;
+
+/* -----Command Line----- */
+Hash_Table* ht;
+typedef struct
+{
+	uint8_t temp[30];
+	uint8_t cmd[10];
+	uint8_t param[30];
+	uint8_t param2[30];
+	uint8_t cmdLen;
+	uint8_t paramLen;
+	uint8_t paramLen2;
+}rxCmd;
+rxCmd myRxCmd;
+uint8_t pos = 0;
+uint8_t rxData = 0;
+volatile uint8_t uartFlag = 0;
+volatile uint8_t cmdFlag = 0;
+volatile uint8_t rxFlag = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -74,6 +123,8 @@ static void MX_SPI1_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
 /* USER CODE BEGIN PFP */
+void si4463MenuDisplay(void);
+void initHashTable(void);
 uint8_t si4463_SPI_Write(uint8_t* pTxData, uint8_t dataLen, uint32_t timeout);
 uint8_t si4463_SPI_Read(uint8_t* pRxData, uint8_t dataLen, uint32_t timeout);
 uint8_t si4463_SPI_WriteRead(uint8_t* pTxData, uint8_t* pRxData, uint8_t dataLen, uint32_t timeout);
@@ -87,6 +138,82 @@ bool si4463_getGPIO1(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	if (huart->Instance == USART2)
+	{
+		/* Enabling interrupt receive again */
+		HAL_UART_Receive_IT(&huart2,(uint8_t*)&rxData,1);
+		switch(rxData)
+		{
+		case ' ':
+			// first space
+			if(uartFlag == 0)
+			{
+				// clear array
+				if(myRxCmd.cmdLen)
+					memset(myRxCmd.cmd, '\0', myRxCmd.cmdLen);
+				memcpy(myRxCmd.cmd, myRxCmd.temp, pos + 1);
+				memset(myRxCmd.temp, '\0', pos + 1);
+				myRxCmd.cmdLen = pos + 1;
+			}
+			// second space
+			else if(uartFlag == 1)
+			{
+				// clear array
+				if(myRxCmd.paramLen)
+					memset(myRxCmd.param, '\0', myRxCmd.paramLen);
+				memcpy(myRxCmd.param, myRxCmd.temp, pos + 1);
+				memset(myRxCmd.temp, '\0', pos + 1);
+				myRxCmd.paramLen = pos + 1;
+			}
+			pos = 0;
+			uartFlag++;
+			printf(" ");
+			break;
+		case '\r':
+			// two parameter
+			if(uartFlag == 2)
+			{
+				// clear array
+				if(myRxCmd.paramLen2)
+					memset(myRxCmd.param2, '\0', myRxCmd.paramLen2);
+				memcpy(myRxCmd.param2, myRxCmd.temp, pos + 1);
+				myRxCmd.paramLen2 = pos + 1;
+			}
+			// one parameter
+			else if(uartFlag == 1)
+			{
+				// clear array
+				if(myRxCmd.paramLen)
+					memset(myRxCmd.param, '\0', myRxCmd.paramLen);
+				memcpy(myRxCmd.param, myRxCmd.temp, pos + 1);
+				myRxCmd.paramLen = pos + 1;
+			}
+			else
+			{
+				// clear array
+				if(myRxCmd.cmdLen)
+					memset(myRxCmd.cmd, '\0', myRxCmd.cmdLen);
+				memcpy(myRxCmd.cmd, myRxCmd.temp, pos + 1);
+				myRxCmd.cmdLen = pos + 1;
+			}
+			memset(myRxCmd.temp, '\0', pos + 1);
+			pos = 0;
+			uartFlag = 0;
+			/* Start execute command */
+			cmdFlag = 1;
+			printf("\r\n");
+			break;
+		default:
+			myRxCmd.temp[pos] = rxData;
+			pos++;
+			printf("%c", rxData);
+		}
+	}
+}
+
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	if(GPIO_Pin == B1_Pin)
@@ -138,6 +265,10 @@ int main(void)
 
   HAL_TIM_Base_Start(&htim1); // us delay timer
 
+  HAL_UART_Receive_IT(&huart2,(uint8_t*)&rxData,1); // Enabling interrupt receive again
+    //HAL_I2C_Slave_Receive_IT(&hi2c1, isr_rxData, SLAVE_RX_BUFFER_SIZE);
+    initHashTable();
+
 	si4463.SPI_Write = si4463_SPI_Write;
 	si4463.SPI_Read = si4463_SPI_Read;
 	si4463.SPI_WriteRead = si4463_SPI_WriteRead;
@@ -159,35 +290,47 @@ int main(void)
 	else
 		printf("Si4463 init .. fail ! error code: %d\r\n", res);
 
-	printf("Get Tx power %d \r\n", si4463_getTxPower(&si4463));
+	si4463_getPartInfo(&si4463);
+	si4463_getFuncInfo(&si4463);
 
-	res = si4463_setTxPower(&si4463, 10);
-	if(res == SI4463_OK)
-	{
-		printf("Set Tx power .. ok !\r\n");
-		printf("Get Tx power %d \r\n", si4463_getTxPower(&si4463));
-	}
-	else
-		printf("Set Tx power .. fail ! error code: %d\r\n", res);
+//	res = si4463_setTxPower(&si4463, 10);
+//	if(res == SI4463_OK)
+//	{
+//		printf("Set Tx power .. ok !\r\n");
+//		printf("Get Tx power %d \r\n", si4463_getTxPower(&si4463));
+//	}
+//	else
+//		printf("Set Tx power .. fail ! error code: %d\r\n", res);
+//
+//
+//	res = si4463_setFrequency(&si4463, 434000000);
+//	if(res == SI4463_OK)
+//	{
+//		printf("Set frequency .. ok !\r\n");
+//		printf("Get frequency %ld \r\n", si4463_getFrequency(&si4463));
+//	}
+//	else
+//		printf("Set frequency .. fail ! error code: %d\r\n", res);
+//
+//	res = si4463_setTxModulation(&si4463, MOD_2GFSK);
+//	if(res == SI4463_OK)
+//	{
+//		printf("Set modulation .. ok !\r\n");
+//		printf("Get modulation %d \r\n", si4463_getModulation(&si4463));
+//	}
+//	else
+//		printf("Set modulation .. fail ! error code: %d\r\n", res);
+//
+//	res = si4463_setTxDataRate(&si4463, DR_2400);
+//	if(res == SI4463_OK)
+//	{
+//		printf("Set data Rate .. ok !\r\n");
+//		printf("Get data Rate %d \r\n", si4463_getDataRate(&si4463));
+//	}
+//	else
+//		printf("Set data Rate .. fail ! error code: %d\r\n", res);
 
 
-	res = si4463_setFrequency(&si4463, 434500000);
-	if(res == SI4463_OK)
-		printf("Set frequency .. ok !\r\n");
-	else
-		printf("Set frequency .. fail ! error code: %d\r\n", res);
-
-	res = si4463_setTxModulation(&si4463, MOD_2FSK);
-
-	res = si4463_setTxDataRate(&si4463, DR_1200);
-
-	uint8_t control = RADIOLIB_AX25_CONTROL_U_UNNUMBERED_INFORMATION | RADIOLIB_AX25_CONTROL_POLL_FINAL_DISABLED | RADIOLIB_AX25_CONTROL_UNNUMBERED_FRAME;
-	ax25frame_t* ax25frame = createAX25Frame("STARL", 0, "NCKU", 0, control, RADIOLIB_AX25_PID_NO_LAYER_3, (uint8_t*)"What is 'X' SATORO ?", strlen("What is 'X' SATORO ?"), 8);
-	uint16_t txLen = 0;
-	uint8_t* txData = AX25Frame_HDLC_Generator(ax25frame, &txLen);
-
-//	ax25_g3ruh_scrambler_init(0x21000UL);
-//	ax25_g3ruh_scrambler(txData, txData, txLen);
 //	res = si4463_initRx(&si4463, 0, STATE_RX, STATE_RX, STATE_RX);
 //	if(res == SI4463_OK)
 //		printf("Start Rx .. ok !\r\n");
@@ -197,6 +340,8 @@ int main(void)
 	//HAL_NVIC_EnableIRQ(EXTI4_IRQn);
 	uint8_t rxDataLen = 0;
 	uint8_t rxData[100] = {0};
+	int cmdCode = -1;
+	int paramCode = -1;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -204,50 +349,408 @@ int main(void)
   while (1)
   {
 
+	if(rxFlag)
+	{
+		if(si4463.gpios.IRQ() == si4463.gpios.gpio_low)
+		{
+			printf("RSSI: %d\r\n", si4463_getLatchRSSI(&si4463));
+			si4463_getInterrupts(&si4463);
+			res = si4463_getRxFifoInfo(&si4463);
+			if(res > 0)
+			{
+				rxDataLen = res;
+				res = si4463_receive(&si4463, rxData, rxDataLen);
+				if(res == SI4463_OK)
+				{
+					printf("Receive .. ok !\r\n");
+					printf("Message: ");
+					for(int i = 0;i < rxDataLen; i++)
+					{
+						printf("0x%02x ", rxData[i]);
+					}
+					printf("\r\n");
+					memset(rxData, '\0', rxDataLen);
 
-	  res = si4463_transmit(&si4463, txData, txLen, STATE_NO_CHANGE);
-	  if(res == SI4463_OK)
-	  {
-		  printf("Si4463 Transmit .. ok !\r\n");
-		  printf("packet: ");
-		  for(int i = 0; i < txLen; i++)
-			  printf("0x%02x ", txData[i]);
-		  printf("\r\n");
-	  }
+				}
+				else
+					printf("Receive .. fail ! error code: %d\r\n", res);
+			}
+			else
+			{
+				printf("Get Rx FiFO info .. fail ! error code: %d\r\n", res);
+			}
+		}
+	}
 
-	  else
-		  printf("Si4463 Transmit .. fail ! error code: %d\r\n", res);
+	if(cmdFlag)
+	{
+		cmdCode = HT_searchKey(ht, (char*)&myRxCmd.cmd[0]);
+		paramCode = HT_searchKey(ht, (char*)&myRxCmd.param[0]);
+//		param2Code = HT_searchKey(ht, (char*)&myRxCmd.param2[0]);
+		switch(cmdCode)
+		{
+		case CMD_HELP:
+			si4463MenuDisplay();
+			break;
+		case CMD_RESET:
+			res = si4463_powerOnReset(&si4463);
+			if(res == SI4463_OK)
+				printf("Si4463 power on reset .. ok !\r\n");
+			else
+				printf("Si4463 power on reset .. fail ! error code: %d\r\n", res);
+			break;
+		case CMD_INIT:
+			res = si4463_init(&si4463);
+			if(res == SI4463_OK)
+				printf("Si4463 init .. ok !\r\n");
+			else
+				printf("Si4463 init .. fail ! error code: %d\r\n", res);
+			break;
+		case CMD_TX:
+			if(myRxCmd.paramLen > 0)
+			{
 
-	  HAL_Delay(3000);
-//	if(si4463.gpios.IRQ() == si4463.gpios.gpio_low)
-//	{
-//		printf("RSSI: %d\r\n", si4463_getLatchRSSI(&si4463));
-//		si4463_getInterrupts(&si4463);
-//		res = si4463_getRxFifoInfo(&si4463);
-//		if(res > 0)
-//		{
-//			rxDataLen = res;
-//			res = si4463_receive(&si4463, rxData, rxDataLen);
-//			if(res == SI4463_OK)
-//			{
-//				printf("Receive .. ok !\r\n");
-//				printf("Message: ");
-//				for(int i = 0;i < rxDataLen; i++)
-//				{
-//					printf("0x%02x ", rxData[i]);
-//				}
-//				printf("\r\n");
-//				memset(rxData, '\0', rxDataLen);
-//
-//			}
-//			else
-//				printf("Receive .. fail ! error code: %d\r\n", res);
-//		}
-//		else
-//		{
-//			printf("Get Rx FiFO info .. fail ! error code: %d\r\n", res);
-//		}
-//	}
+				uint8_t control = RADIOLIB_AX25_CONTROL_U_UNNUMBERED_INFORMATION | RADIOLIB_AX25_CONTROL_POLL_FINAL_DISABLED | RADIOLIB_AX25_CONTROL_UNNUMBERED_FRAME;
+				ax25frame_t* ax25frame = createAX25Frame("STARL", 0, "NCKU", 0, control, RADIOLIB_AX25_PID_NO_LAYER_3, (uint8_t*)myRxCmd.param, myRxCmd.paramLen, 8);
+				uint16_t txLen = 0;
+				uint8_t* txData = AX25Frame_HDLC_Generator(ax25frame, &txLen);
+
+				ax25_g3ruh_scrambler_init(0x21000UL);
+				ax25_g3ruh_scrambler(txData, txData, txLen);
+				res = si4463_transmit(&si4463, txData, txLen, STATE_NO_CHANGE);
+				if(res == SI4463_OK)
+				{
+					printf("Si4463 Transmit .. ok !\r\n");
+					printf("packet: ");
+					for(int i = 0; i <  txLen; i++)
+						printf("0x%02x ", txData[i]);
+					printf("\r\n");
+				}
+				else
+					printf("Si4463 Transmit .. fail ! error code: %d\r\n", res);
+			}
+			else
+			{
+				printf("Invalid packets ! \r\n");
+			}
+			break;
+		case CMD_CONTINUE_TX:
+			printf("TBD \r\n");
+			break;
+		case CMD_RX:
+			res = si4463_initRx(&si4463, 0, STATE_RX, STATE_RX, STATE_RX);
+			if(res == SI4463_OK)
+			{
+				printf("Start Rx .. ok !\r\n");
+				rxFlag = 1;
+			}
+			else
+				printf("Start Rx .. fail ! error code: %d\r\n", res);
+			break;
+		case CMD_NOP:
+			res = si4463_checkNop(&si4463);
+			if(res == SI4463_OK)
+				printf("Si4463 has responded !\r\n");
+			else
+				printf("Si4463 NOP .. fail ! error code: %d\r\n", res);
+			break;
+		case CMD_SET:
+			if(paramCode == PARAM_TXPWR)
+			{
+				int txpwr = atoi((char*)myRxCmd.param2);
+				if(txpwr > 0)
+				{
+					res = si4463_setTxPower(&si4463, txpwr);
+					if(res == SI4463_OK)
+					{
+						printf("Set Tx power .. ok !\r\n");
+						printf("Get Tx power %d \r\n", si4463_getTxPower(&si4463));
+					}
+					else
+						printf("Set Tx power .. fail ! error code: %d\r\n", res);
+				}
+				else
+				{
+					printf("Invalid parameter ! \r\n");
+				}
+			}
+			else if(paramCode == PARAM_PREAMBLE)
+			{
+				int preamble = atoi((char*)myRxCmd.param2);
+				if(preamble > 0)
+				{
+					res = si4463_setPreamble(&si4463, preamble);
+					if(res == SI4463_OK)
+					{
+						printf("Set Tx preamble .. ok !\r\n");
+						printf("Get Tx preamble %d \r\n", si4463_getPreamble(&si4463));
+					}
+					else
+						printf("Set Tx power .. fail ! error code: %d\r\n", res);
+				}
+				else
+				{
+					printf("Invalid parameter ! \r\n");
+				}
+			}
+			else if(paramCode == PARAM_SYNCWORD)
+			{
+				printf("TBD \r\n");
+			}
+			else if(paramCode == PARAM_CRC_POLY)
+			{
+				int poly = atoi((char*)myRxCmd.param2);
+				if(poly > 0)
+				{
+					res = si4463_setCRC(&si4463, si4463.settings.crcSeed, poly);
+					if(res == SI4463_OK)
+					{
+						si4463_getCRC(&si4463);
+						printf("Set CRC polynomial .. ok !\r\n");
+						printf("Get CRC polynomial %d \r\n", si4463.settings.crcPoly);
+					}
+					else
+						printf("Set Tx power .. fail ! error code: %d\r\n", res);
+				}
+				else
+				{
+					printf("Invalid parameter ! \r\n");
+				}
+			}
+			else if(paramCode == PARAM_CRC_SEED)
+			{
+				int seed = atoi((char*)myRxCmd.param2);
+				if(seed == 0 || seed == 1)
+				{
+					res = si4463_setCRC(&si4463, seed, si4463.settings.crcPoly);
+					if(res == SI4463_OK)
+					{
+						si4463_getCRC(&si4463);
+						printf("Set CRC polynomial .. ok !\r\n");
+						printf("Get CRC polynomial %d \r\n", si4463.settings.crcSeed);
+					}
+					else
+						printf("Set Tx power .. fail ! error code: %d\r\n", res);
+				}
+				else
+				{
+					printf("Invalid parameter ! \r\n");
+				}
+			}
+			else if(paramCode == PARAM_FREQUENCY)
+			{
+				int freq = atoi((char*)myRxCmd.param2);
+				if(freq >= 400000000 && freq < 436000000)
+				{
+					res = si4463_setFrequency(&si4463, freq);
+					if(res == SI4463_OK)
+					{
+						printf("Set frequency .. ok !\r\n");
+						printf("Get frequency %ld \r\n", si4463_getFrequency(&si4463));
+					}
+					else
+						printf("Set Tx power .. fail ! error code: %d\r\n", res);
+				}
+				else
+				{
+					printf("Invalid parameter ! \r\n");
+				}
+			}
+			else if(paramCode == PARAM_TX_MODULATION)
+			{
+				int txmod = atoi((char*)myRxCmd.param2);
+				if(txmod >= 0)
+				{
+					res = si4463_setTxModulation(&si4463, txmod);
+					if(res == SI4463_OK)
+					{
+						printf("Set Tx modulation .. ok !\r\n");
+						printf("Get Tx modulation %d \r\n", si4463.settings.txMod);
+					}
+					else
+						printf("Set Tx modulation .. fail ! error code: %d\r\n", res);
+				}
+				else
+				{
+					printf("Invalid parameter ! \r\n");
+				}
+			}
+			else if(paramCode == PARAM_RX_MODULATION)
+			{
+				int rxmod = atoi((char*)myRxCmd.param2);
+				if(rxmod >= 0)
+				{
+					res = si4463_setRxModulation(&si4463, rxmod);
+					if(res == SI4463_OK)
+					{
+						printf("Set Rx modulation .. ok !\r\n");
+						printf("Get Rx modulation %d \r\n", si4463.settings.rxMod);
+					}
+					else
+						printf("Set Rx modulation .. fail ! error code: %d\r\n", res);
+				}
+				else
+				{
+					printf("Invalid parameter ! \r\n");
+				}
+			}
+			else if(paramCode == PARAM_TX_DATARATE)
+			{
+				int txdr = atoi((char*)myRxCmd.param2);
+				if(txdr >= 0)
+				{
+					res = si4463_setTxDataRate(&si4463, txdr);
+					if(res == SI4463_OK)
+					{
+						printf("Set Tx data rate .. ok !\r\n");
+						printf("Get Tx data rate %d \r\n", si4463.settings.txDataRate);
+					}
+					else
+						printf("Set Tx data rate .. fail ! error code: %d\r\n", res);
+				}
+				else
+				{
+					printf("Invalid parameter ! \r\n");
+				}
+			}
+			else if(paramCode == PARAM_RX_DATARATE)
+			{
+				int rxdr = atoi((char*)myRxCmd.param2);
+				if(rxdr >= 0)
+				{
+					res = si4463_setRxDataRate(&si4463, rxdr);
+					if(res == SI4463_OK)
+					{
+						printf("Set Rx data rate .. ok !\r\n");
+						printf("Get Rx data rate %d \r\n", si4463.settings.rxDataRate);
+					}
+					else
+						printf("Set Rx data rate .. fail ! error code: %d\r\n", res);
+				}
+				else
+				{
+					printf("Invalid parameter ! \r\n");
+				}
+			}
+			else
+			{
+				printf("Invalid parameter ! \r\n");
+			}
+			break;
+		case CMD_GET:
+			if(paramCode == PARAM_PART)
+			{
+				res = si4463_getPartInfo(&si4463);
+				if(res == SI4463_OK)
+					printf("Si4463 get part info .. ok !\r\n");
+				else
+					printf("Si4463 get part info .. fail ! error code: %d\r\n", res);
+			}
+			else if(paramCode == PARAM_FUNC)
+			{
+				res = si4463_getFuncInfo(&si4463);
+				if(res == SI4463_OK)
+					printf("Si4463 get function info .. ok !\r\n");
+				else
+					printf("Si4463 get function info .. fail ! error code: %d\r\n", res);
+			}
+			else if(paramCode == PARAM_CURRSSI)
+			{
+				res = si4463_getCurrentRSSI(&si4463);
+				if(res < -12)
+					printf("Si4463 get current RSSI: %d\r\n", res);
+				else
+					printf("Si4463 get current RSSI .. fail ! error code: %d\r\n", res);
+			}
+			else if(paramCode == PARAM_LATRSSI)
+			{
+				res = si4463_getLatchRSSI(&si4463);
+				if(res < -12)
+					printf("Si4463 get latch RSSI: %d\r\n", res);
+				else
+					printf("Si4463 get latch RSSI .. fail ! error code: %d\r\n", res);
+			}
+			else if(paramCode == PARAM_INTS)
+			{
+				res = si4463_getInterrupts(&si4463);
+				if(res == SI4463_OK)
+					printf("Si4463 get interrupts' info .. ok !\r\n");
+				else
+					printf("Si4463 get interrupts' info .. fail ! error code: %d\r\n", res);
+			}
+			else if(paramCode == PARAM_TXPWR)
+			{
+				res = si4463_getTxPower(&si4463);
+				if(res >= 0)
+					printf("Si4463 get Tx power: %d\r\n", res);
+				else
+					printf("Si4463 get Tx power .. fail ! error code: %d\r\n", res);
+			}
+			else if(paramCode == PARAM_PREAMBLE)
+			{
+				res = si4463_getPreamble(&si4463);
+				if(res >= 0)
+					printf("Si4463 get preamble: %d\r\n", res);
+				else
+					printf("Si4463 get preamble .. fail ! error code: %d\r\n", res);
+			}
+			else if(paramCode == PARAM_SYNCWORD)
+			{
+				res = si4463_getSyncWords(&si4463);
+				if(res >= 0)
+				{
+					printf("Si4463 get sync words: ");
+					for(int i = 0; i < res; i++)
+					{
+						printf("0x%02x ", si4463.settings.syncWords[i]);
+					}
+					printf("\r\n");
+				}
+				else
+					printf("Si4463 get sync words .. fail ! error code: %d\r\n", res);
+			}
+			else if(paramCode == PARAM_CRC)
+			{
+				res = si4463_getCRC(&si4463);
+				if(res == SI4463_OK)
+					printf("Si4463 get CRC Poly: %d, Seed: %d\r\n", si4463.settings.crcPoly, si4463.settings.crcSeed);
+				else
+					printf("Si4463 get CRC Poly .. fail ! error code: %d\r\n", res);
+			}
+			else if(paramCode == PARAM_FREQUENCY)
+			{
+				res = si4463_getFrequency(&si4463);
+				if(res >= 0)
+					printf("Si4463 get Tx/Rx frequency: %d\r\n", res);
+				else
+					printf("Si4463 get Tx/Rx frequency .. fail ! error code: %d\r\n", res);
+			}
+			else if(paramCode == PARAM_MODULATION)
+			{
+				res = si4463_getModulation(&si4463);
+				if(res >= 0)
+					printf("Si4463 get Tx modulation: %d\r\n", res);
+				else
+					printf("Si4463 get Tx modulation .. fail ! error code: %d\r\n", res);
+			}
+			else if(paramCode == PARAM_DATARATE)
+			{
+				res = si4463_getDataRate(&si4463);
+				if(res >= 0)
+					printf("Si4463 get Tx data rate: %d\r\n", res);
+				else
+					printf("Si4463 get Tx data rate .. fail ! error code: %d\r\n", res);
+			}
+			else
+			{
+				printf("Invalid parameter ! \r\n");
+			}
+			break;
+		default:
+			printf("Display the command menu -----------> help \r\n\r\n");
+		}
+		cmdFlag = 0;
+	}
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -553,6 +1056,78 @@ bool si4463_getIRQ(void)
 bool si4463_getGPIO1(void)
 {
 	return HAL_GPIO_ReadPin(GPIO1_GPIO_Port, GPIO1_Pin);
+}
+
+void si4463MenuDisplay(void)
+{
+	printf("============== Command Menu ============== \r\n");
+	printf("Display the command menu -----------> help \r\n");
+	printf("Power on reset si4463 chip ---------> reset \r\n");
+	printf("Initialize si4463 configuration ----> init \r\n");
+	printf("Communicate to si4463 with NOP -----> nop \r\n");
+	printf("Transmit packets -------------------> tx  [string] \r\n");
+	printf("Send the most recently sent data ---> contx \r\n");
+	printf("Start to receive packets -----------> rx \r\n");
+	printf("Basic information about si4463 -----> get part \r\n");
+	printf("Function revision information ------> get func \r\n");
+	printf("Obtain the current RSSI ------------> get curRSSI \r\n");
+	printf("Get RSSI when receiving signal -----> get latRSSI \r\n");
+	printf("Get the status of all interrupts ---> get ints \r\n");
+	printf("Set the transmission power ---------> set txpwr    [0-127] \r\n");
+	printf("Get the transmission power ---------> get txpwr \r\n");
+	printf("Set the preamble number ------------> set preamble [5-255] \r\n");
+	printf("Get the preamble number ------------> get preamble \r\n");
+	printf("Set the syncwords ------------------> set syncword [TBD] \r\n");
+	printf("Get the syncwords ------------------> get syncword \r\n");
+	printf("Set the CRC polynomial -------------> set crc      [0-9] \r\n");
+	printf("Get the CRC polynomial/seed --------> get crc \r\n");
+	printf("Set TX/RX frequency ----------------> set freq     [Hz] \r\n");
+	printf("Get TX/RX frequency ----------------> get freq \r\n");
+	printf("Set the TX modulation --------------> set txmod    [0-2] \r\n");
+	printf("Set the RX modulation --------------> set rxmod    [0-2] \r\n");
+	printf("Get the TX modulation --------------> get mod \r\n");
+	printf("Set the TX data rate ---------------> set txdr     [0-3] \r\n");
+	printf("Set the RX data rate ---------------> set rxdr     [0-3] \r\n");
+	printf("Get the TX data rate ---------------> get dr \r\n");
+}
+
+void initHashTable(void)
+{
+	// define the function pointer
+	HT_malloc = &malloc;
+	HT_free = &free;
+	// select commands
+	ht = HT_createTable(50);
+	HT_insertItem(ht, "help",    0);
+	HT_insertItem(ht, "reset",   1);
+	HT_insertItem(ht, "init",    2);
+	HT_insertItem(ht, "nop",     3);
+	HT_insertItem(ht, "part",    4);
+	HT_insertItem(ht, "func",    5);
+	HT_insertItem(ht, "curRSSI", 6);
+	HT_insertItem(ht, "latRSSI", 7);
+	HT_insertItem(ht, "ints",    10);
+	HT_insertItem(ht, "tx",      11);
+	HT_insertItem(ht, "rx",      12);
+	HT_insertItem(ht, "txpwr",   13);
+	HT_insertItem(ht, "preamble",14);
+	HT_insertItem(ht, "contx",   15);
+	HT_insertItem(ht, "syncword",20);
+	HT_insertItem(ht, "crc",     30);
+	HT_insertItem(ht, "freq",    31);
+	HT_insertItem(ht, "mod",     32);
+	HT_insertItem(ht, "dr",      33);
+	HT_insertItem(ht, "crcpoly", 34);
+	HT_insertItem(ht, "crcseed", 35);
+	HT_insertItem(ht, "txmod",   36);
+	HT_insertItem(ht, "rxmod",   37);
+	HT_insertItem(ht, "txdr",    38);
+	HT_insertItem(ht, "rxdr",    39);
+	HT_insertItem(ht, "get",     50);
+	HT_insertItem(ht, "set",     51);
+	HT_print(ht);
+
+	printf("Search Key %s: Value %d \r\n", "check", HT_searchKey(ht, "check"));
 }
 /* USER CODE END 4 */
 

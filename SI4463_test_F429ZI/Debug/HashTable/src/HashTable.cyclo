@@ -1,0 +1,13 @@
+../HashTable/src/HashTable.c:33:10:HT_createItem	1
+../HashTable/src/HashTable.c:43:13:HT_createTable	2
+../HashTable/src/HashTable.c:57:6:ht_freeItem	1
+../HashTable/src/HashTable.c:63:6:HT_freeTable	3
+../HashTable/src/HashTable.c:76:6:HT_print	4
+../HashTable/src/HashTable.c:103:6:HT_insertItem	2
+../HashTable/src/HashTable.c:124:6:HT_deleteItem	2
+../HashTable/src/HashTable.c:137:5:HT_searchKey	4
+../HashTable/src/HashTable.c:157:16:linkedlist_allocate	1
+../HashTable/src/HashTable.c:162:6:linkedlist_insert	2
+../HashTable/src/HashTable.c:175:6:linkedlist_delete	6
+../HashTable/src/HashTable.c:226:6:linkedlist_free	3
+../HashTable/src/HashTable.c:240:10:ht_hashFunction	2

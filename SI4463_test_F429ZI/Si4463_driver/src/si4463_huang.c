@@ -18,6 +18,7 @@ int8_t si4463_startTx(si4463_t* si4463, uint16_t dataLen, si4463_state nextState
 int8_t si4463_readRxDataBuff(si4463_t* si4463, uint8_t* rxFifoData, uint8_t rxFifoLength);
 // int8_t si4463_getFastResponseReg(uint8_t* regVal, uint8_t startRegs, uint8_t regsNum);
 int8_t si4463_getFreqConfig(si4463_t* si4463);
+int8_t si4463_getDataRateConfig(si4463_t* si4463);
 int8_t si4463_configArray(si4463_t* si4463, uint8_t* configArray);
 int8_t si4463_setProperties(si4463_t* si4463, uint8_t* setData, uint8_t setDataLen, uint16_t propNum);
 int8_t si4463_getProperties(si4463_t* si4463, uint8_t* getData, uint8_t getDataLen, uint16_t propNum);
@@ -101,6 +102,12 @@ int8_t si4463_getPartInfo(si4463_t* si4463)
     DEBUG_PRINTF("rxbuff: %02x %02x %02x %02x %02x %02x %02x %02x\r\n",
 			rxbuff[0], rxbuff[1], rxbuff[2], rxbuff[3], rxbuff[4], rxbuff[5], rxbuff[6], rxbuff[7]);
     if((uint16_t)((rxbuff[1] << 8) | rxbuff[2]) != 0x4463) return SI4463_ERR_CHIP_VERSION;
+    si4463->partInfo.chipRev = rxbuff[0];
+    si4463->partInfo.partNum = (rxbuff[1] << 8) | rxbuff[2];
+    si4463->partInfo.partBuild = rxbuff[3];
+    si4463->partInfo.Id = (rxbuff[4] << 8) | rxbuff[5];
+    si4463->partInfo.CustomerId = rxbuff[6];
+    si4463->partInfo.ROMId = rxbuff[7];
     return SI4463_OK;
 }
 
@@ -112,6 +119,11 @@ int8_t si4463_getFuncInfo(si4463_t* si4463)
     if(!si4463_getResponse(si4463, rxbuff, 6)) return SI4463_ERR_READ_REG;
     DEBUG_PRINTF("rxbuff: %02x %02x %02x %02x %02x %02x\r\n",
 			rxbuff[0], rxbuff[1], rxbuff[2], rxbuff[3], rxbuff[4], rxbuff[5]);
+    si4463->funInfo.revExt = rxbuff[0];
+    si4463->funInfo.revBranch = rxbuff[1];
+    si4463->funInfo.revInt = rxbuff[2];
+    si4463->funInfo.patch = (rxbuff[3] << 8) | rxbuff[4];
+    si4463->funInfo.func = rxbuff[5];
     return SI4463_OK;
 }
 
@@ -135,24 +147,26 @@ int16_t si4463_getRxFifoInfo(si4463_t* si4463)
     return rxbuff[0];
 }
 
-int16_t si4463_getCurrentRSSI(si4463_t* si4463)
+int8_t si4463_getCurrentRSSI(si4463_t* si4463)
 {
 	uint8_t cmd[2] = {GET_MODEM_STATUS, 0x00};
 	uint8_t rxbuff[8] = {0};
 	if(!si4463_sendCommand(si4463, cmd, 2)) return SI4463_ERR_WRITE_REG;
 	if(!si4463_getResponse(si4463, rxbuff, 8)) return SI4463_ERR_READ_REG;
 
-	return rxbuff[2]/2-120;
+    si4463->status.currentRSSI = rxbuff[2]/2-120;
+	return si4463->status.currentRSSI;
 }
 
-int16_t si4463_getLatchRSSI(si4463_t* si4463)
+int8_t si4463_getLatchRSSI(si4463_t* si4463)
 {
 	uint8_t cmd[2] = {GET_MODEM_STATUS, 0x00};
 	uint8_t rxbuff[8] = {0};
 	if(!si4463_sendCommand(si4463, cmd, 2)) return SI4463_ERR_WRITE_REG;
 	if(!si4463_getResponse(si4463, rxbuff, 8)) return SI4463_ERR_READ_REG;
 
-	return rxbuff[3]/2-120;
+    si4463->status.latchRSSI = rxbuff[3]/2-120;
+	return si4463->status.latchRSSI;
 }
 
 int8_t si4463_clearTxFifo(si4463_t* si4463)
@@ -291,21 +305,30 @@ int8_t si4463_setTxPower(si4463_t* si4463, uint8_t power)
     if(power > 127 || power < 5) return SI4463_ERR_BAD_PARAM;
     uint8_t cmd = power;
 
-    int res = si4463_setProperties(si4463, &cmd, 1, PROP_PA_PWR_LVL);
+    return si4463_setProperties(si4463, &cmd, 1, PROP_PA_PWR_LVL);
+}
+
+int8_t si4463_getTxPower(si4463_t* si4463)
+{
+    uint16_t propNum = PROP_PA_PWR_LVL;
+    uint8_t rxbuff = 0;
+    int res = si4463_getProperties(si4463, &rxbuff, 1, propNum);
     if(res == SI4463_OK)
     {
-        if(power >= 80)
+        if(rxbuff >= 80)
             si4463->settings.power = PWR_20_dBm;
-        else if(power >= 25)
+        else if(rxbuff >= 25)
             si4463->settings.power = PWR_14_dBm;
-        else if(power >= 17)
+        else if(rxbuff >= 17)
             si4463->settings.power = PWR_10_dBm;
-        else if(power >= 9)
+        else if(rxbuff >= 9)
             si4463->settings.power = PWR_4_dBm;
-        else if(power >= 5)
+        else if(rxbuff >= 5)
             si4463->settings.power = PWR_0_dBm;
+        return rxbuff;
     }
-    return res;
+    else
+        return res;
 }
 
 int8_t si4463_setPreamble(si4463_t* si4463, uint8_t preambleLen)
@@ -313,11 +336,21 @@ int8_t si4463_setPreamble(si4463_t* si4463, uint8_t preambleLen)
     if(preambleLen < 5) return SI4463_ERR_BAD_PARAM;
     uint8_t cmd = preambleLen;
 
-    int res = si4463_setProperties(si4463, &cmd, 1, PROP_PREAMBLE_TX_LENGTH);
-    if(res == SI4463_OK)
-        si4463->settings.preambleNum = preambleLen;
+    return si4463_setProperties(si4463, &cmd, 1, PROP_PREAMBLE_TX_LENGTH);
+}
 
-    return res;
+int16_t si4463_getPreamble(si4463_t* si4463)
+{
+    uint16_t propNum = PROP_PREAMBLE_TX_LENGTH;
+    uint8_t rxbuff = 0;
+    int res = si4463_getProperties(si4463, &rxbuff, 1, propNum);
+    if(res == SI4463_OK)
+    {
+        si4463->settings.preambleNum = rxbuff;
+        return si4463->settings.preambleNum;
+    }
+    else
+        return res;
 }
 
 int8_t si4463_setSyncWords(si4463_t* si4463, uint8_t* syncdata, uint8_t syncLen)
@@ -328,27 +361,49 @@ int8_t si4463_setSyncWords(si4463_t* si4463, uint8_t* syncdata, uint8_t syncLen)
     memcpy(&cmd[1], syncdata, syncLen);
 
     int res = si4463_setProperties(si4463, cmd, 1 + syncLen, PROP_SYNC_CONFIG);
-    if(res == SI4463_OK)
-    {
-        for(int i = 0; i < syncLen; i++)
-            si4463->settings.syncWords[i] = syncdata[i];
-    }
+
     free(cmd);
     return res;
+}
+
+int8_t si4463_getSyncWords(si4463_t* si4463)
+{
+    uint16_t propNum = PROP_SYNC_CONFIG;
+    uint8_t rxbuff[5] = {0};
+    int res = si4463_getProperties(si4463, rxbuff, 5, propNum);
+    if(res == SI4463_OK)
+    {
+        uint8_t syncLen = (0x03 & rxbuff[0]) + 1;
+        for(int i = 0; i < syncLen; i++)
+            si4463->settings.syncWords[i] = rxbuff[i+1];
+        
+        return syncLen;
+    }
+    else
+        return res;
 }
 
 int8_t si4463_setCRC(si4463_t* si4463, bool crcSeed, si4463_crc_poly crcPoly)
 {
 	if((0x0F & crcPoly) > 8) return 0;
 	uint8_t cmd = (0x80 & (crcSeed << 3))  | (0x0F & crcPoly);
+ 
+    return si4463_setProperties(si4463, &cmd, 1, PROP_PKT_CRC_CONFIG);
+}
 
-	int res = si4463_setProperties(si4463, &cmd, 1, PROP_PKT_CRC_CONFIG);
+int8_t si4463_getCRC(si4463_t* si4463)
+{
+    uint16_t propNum = PROP_PKT_CRC_CONFIG;
+    uint8_t rxbuff = 0;
+    int res = si4463_getProperties(si4463, &rxbuff, 1, propNum);
     if(res == SI4463_OK)
     {
-        si4463->settings.crcSeed = crcSeed;
-        si4463->settings.crcPoly = crcPoly;
+        si4463->settings.crcSeed = (0x80 & rxbuff) >> 7;
+        si4463->settings.crcPoly = 0x0F & rxbuff;
+        return SI4463_OK;
     }
-    return res;
+    else
+        return res;
 }
 
 int8_t si4463_getFreqConfig(si4463_t* si4463)
@@ -416,6 +471,20 @@ int8_t si4463_setFrequency(si4463_t* si4463, uint32_t freq)
         cmd[1] = 0xFF & fc_frac >> 8;
         cmd[2] = 0xFF & fc_frac;
         return si4463_setProperties(si4463, cmd, 3, PROP_FREQ_CONTROL_FRAC);
+    }
+    else
+        return res;
+}
+
+int32_t si4463_getFrequency(si4463_t* si4463)
+{
+    int res = si4463_getFreqConfig(si4463);
+    if(res == SI4463_OK)
+    {
+        float frequecny = ((float)si4463->freq.freq_inte + (float)si4463->freq.freq_frac/pow(2, 19))*(si4463->freq.n_presc*(float)RADIO_CONFIGURATION_DATA_RADIO_XO_FREQ/si4463->freq.outdiv);
+        int32_t rounded_freq = (int)(frequecny * 0.001 + 0.5)*1000;
+        si4463->settings.frequency = rounded_freq;
+        return si4463->settings.frequency;
     }
     else
         return res;
@@ -513,6 +582,20 @@ int8_t si4463_setRxModulation(si4463_t* si4463, si4463_mod_type mod)
     return res;
 }
 
+int8_t si4463_getModulation(si4463_t* si4463)
+{
+    uint16_t propNum = PROP_MODEM_MOD_TYPE;
+    uint8_t rxbuff = 0;
+    int res = si4463_getProperties(si4463, &rxbuff, 1, propNum);
+    if(res == SI4463_OK)
+    {
+        uint8_t modType = 0x07 & rxbuff;
+        return modType;
+    }
+    else
+        return res;
+}
+
 int8_t si4463_setTxDataRate(si4463_t* si4463, si4463_data_rate dataRate)
 {
     int res = SI4463_OK;
@@ -589,13 +672,45 @@ int8_t si4463_setRxDataRate(si4463_t* si4463, si4463_data_rate dataRate)
     return res;
 }
 
-int8_t si4463_getTxPower(si4463_t* si4463)
+int16_t si4463_getDataRate(si4463_t* si4463)
 {
-    uint16_t propNum = PROP_PA_PWR_LVL;
-    uint8_t rxbuff = 0;
-    int res = si4463_getProperties(si4463, &rxbuff, 1, propNum);
+    int res = si4463_getDataRateConfig(si4463);
     if(res == SI4463_OK)
-        return rxbuff;
+    {
+        uint8_t TXOSR = 0;
+        switch(si4463->dr.TxOSR)
+        {
+        case OVERSAMPLING_RATIO_10:
+            TXOSR = 10;
+            break;
+        case OVERSAMPLING_RATIO_40:
+            TXOSR = 40;
+            break;
+        case OVERSAMPLING_RATIO_20:
+            TXOSR = 20;
+            break;
+        default:
+            return SI4463_ERR_INVALID_TXOSR;
+        }
+        float datarate = (si4463->dr.modemDataRate * (float)RADIO_CONFIGURATION_DATA_RADIO_XO_FREQ)/(float)(si4463->dr.modemTxNCOMode)/TXOSR;
+        return (int16_t)datarate;
+    }
+    else
+        return res;
+}
+
+int8_t si4463_getDataRateConfig(si4463_t* si4463)
+{
+    uint16_t propNum = PROP_MODEM_DATA_RATE;
+    uint8_t rxbuff[7] = {0};
+    int res = si4463_getProperties(si4463, rxbuff, 7, propNum);
+    if(res == SI4463_OK)
+    {
+        si4463->dr.modemDataRate = (rxbuff[0] << 16) | (rxbuff[1] << 8) | rxbuff[2];
+        si4463->dr.modemTxNCOMode = ((rxbuff[3] & 0x03) << 24) | (rxbuff[4] << 16) | (rxbuff[5] << 8) | rxbuff[6];
+        si4463->dr.TxOSR = (rxbuff[3] & 0x0C) >> 2;
+        return res;
+    }
     else
         return res;
 }

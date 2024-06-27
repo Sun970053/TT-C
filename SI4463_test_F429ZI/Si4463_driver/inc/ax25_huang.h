@@ -139,6 +139,7 @@ typedef struct
 ax25frame_t* createAX25Frame(const char* destCallsign, uint8_t destSSID, const char* srcCallsign, uint8_t srcSSID, uint8_t control, uint8_t protocolID, uint8_t* info, uint16_t infoLen, uint16_t preLen);
 void deleteAX25Frame(ax25frame_t* frame);
 uint8_t* AX25Frame_HDLC_Generator(ax25frame_t* ax25frame, uint16_t* stuffedFrameLen);
+uint8_t* AX25Frame_HDLC_Parser();
 void ax25_nrzi_encode(uint8_t* buf, uint8_t* output, uint16_t len);
 void ax25_g3ruh_scrambler_init(uint32_t tap_mask);
 void ax25_g3ruh_scrambler(uint8_t* unscrambled, uint8_t* scrambled, uint16_t len);
