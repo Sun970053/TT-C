@@ -109,7 +109,7 @@ void initCRC(ax25frame_t* ax25frame)
   ax25frame->crc.refOut = false;
 }
 
-uint8_t* AX25Frame_HDLC_Generator(ax25sendframe_t* ax25frame, uint16_t* stuffedFrameLen)
+uint16_t AX25Frame_HDLC_Generator(ax25sendframe_t* ax25frame, uint8_t** stuffedFrame, uint16_t* stuffedFrameLen)
 {
   // check destination callsign length (6 characters max)
   if(strlen(ax25frame->destCallsign) > RADIOLIB_AX25_MAX_CALLSIGN_LEN) {
@@ -273,7 +273,7 @@ uint8_t* AX25Frame_HDLC_Generator(ax25sendframe_t* ax25frame, uint16_t* stuffedF
 	}
 
     *stuffedFrameLen = stuffedFrameBuffLen;
-    return stuffedFrameBuff;
+    *stuffedFrame = stuffedFrameBuff;
 }
 
 uint32_t reflect(uint32_t in, uint8_t bits) {
@@ -284,51 +284,125 @@ uint32_t reflect(uint32_t in, uint8_t bits) {
   return(res);
 }
 
-uint8_t AX25Frame_HDLC_Parser(ax25receiveframe_t* ax25frame , uint8_t** inputStuffedFrame, uint16_t* inputStuffedFrameLen)
+uint16_t AX25Frame_HDLC_Parser(ax25receiveframe_t* ax25frame , uint8_t** inputStuffedFrame, uint16_t* inputStuffedFrameLen)
 {
+  // prepare the true length of AX.25 frame
+  size_t ax25frameBuffLen = 0;
+  // calculate the unstuff bytes length without preamble and front flag 
+  size_t unStuffedFrameBuffLen = *inputStuffedFrameLen - ax25frame->preambleLen - 1;
   // prepare buffer for the unstuffed frame (only AX.25 frame)
-  // worst-case scenario: sequence of 1s, will have 120% of the original length, stuffed frame also includes both flags
-  uint8_t* ax25FrameBuff = (uint8_t*)malloc(*inputStuffedFrameLen - ax25frame->preambleLen);
+  uint8_t* unStuffedFrameBuff = (uint8_t*)malloc(unStuffedFrameBuffLen);
   
   // initialize buffer to all zeros
-  memset(ax25FrameBuff, 0x00, *inputStuffedFrameLen - ax25frame->preambleLen);
+  memset(unStuffedFrameBuff, 0x00, unStuffedFrameBuffLen);
 
-  // unstuff bits (skip preamble and both flags)
+  // stuff bits (skip preamble and front flag)
   uint16_t stuffedFrameBuffLenBits = 8*(ax25frame->preambleLen + 1);
+
   uint8_t count = 0;
-  for(size_t i = 0; i < frameBuffLen + 2; i++) 
+  for(size_t i = 0; i < unStuffedFrameBuffLen * 8; i++) 
   {
-    for(int8_t shift = 7; shift >= 0; shift--) 
+    uint16_t stuffedFrameBuffPos = stuffedFrameBuffLenBits + 7 - 2*(stuffedFrameBuffLenBits%8);
+    // check if HDLC frame in certain position is 1
+    if(GET_BIT_IN_ARRAY(*inputStuffedFrame, stuffedFrameBuffPos)) 
     {
-      uint16_t stuffedFrameBuffPos = stuffedFrameBuffLenBits + 7 - 2*(stuffedFrameBuffLenBits%8);
-      if((frameBuff[i] >> shift) & 0x01) 
-      {
-        // copy 1 and increment counter
-        SET_BIT_IN_ARRAY(stuffedFrameBuff, stuffedFrameBuffPos);
-        stuffedFrameBuffLenBits++;
-        count++;
+      SET_BIT_IN_ARRAY(unStuffedFrameBuff, i);
+      stuffedFrameBuffLenBits++;
+      count++;
 
-        // check 5 consecutive 1s
-        if(count == 5) 
+      // check 5 consecutive 1s
+      if(count == 5) 
+      {
+        // get the new position in stuffed frame
+        stuffedFrameBuffPos = stuffedFrameBuffLenBits + 7 - 2*(stuffedFrameBuffLenBits%8);
+
+        // check if HDLC frame in certain position is 0
+        if(!GET_BIT_IN_ARRAY(*inputStuffedFrame, stuffedFrameBuffPos))
         {
-          // get the new position in stuffed frame
-          stuffedFrameBuffPos = stuffedFrameBuffLenBits + 7 - 2*(stuffedFrameBuffLenBits%8);
-
-          // insert 0 and reset counter
-          CLEAR_BIT_IN_ARRAY(stuffedFrameBuff, stuffedFrameBuffPos);
           stuffedFrameBuffLenBits++;
-          count = 0;
+          i--;
+        }   
+        // if HDLC frame in certain position is 1, then there are 6 consecutive 1s. 
+        // That byte should be an end flag. 
+        else
+        {
+          ax25frameBuffLen = i/8;
+          break;
         }
-      } 
-      else 
-      {
-        // copy 0 and reset counter
-        CLEAR_BIT_IN_ARRAY(stuffedFrameBuff, stuffedFrameBuffPos);
-        stuffedFrameBuffLenBits++;
+          
         count = 0;
       }
+    } 
+    else 
+    {
+      // copy 0 and reset counter
+      CLEAR_BIT_IN_ARRAY(unStuffedFrameBuff, i);
+      stuffedFrameBuffLenBits++;
+      count = 0;
     }
   }
+
+  // Reallocate the AX.25 frame size
+  uint8_t* ax25frameBuff = (uint8_t*)malloc(ax25frameBuffLen * sizeof(uint8_t));
+  memcpy(ax25frameBuff, unStuffedFrameBuff, ax25frameBuffLen);
+  free(unStuffedFrameBuff);
+  // verify CRC result
+  uint16_t fcs = checksum(ax25frame, ax25frameBuff, ax25frameBuffLen - 2);
+  if(((uint8_t)((fcs >> 8) & 0xFF) != ax25frameBuff[ax25frameBuffLen-2]) || ((uint8_t)(fcs & 0xFF) != ax25frameBuff[ax25frameBuffLen-1]))
+  {
+    ax25frame->isCrcOk = false;
+    return RADIOLIB_ERR_RX_CRC_CHECKSUM;
+  }
+  else
+    ax25frame->isCrcOk = true;
+
+  // flip bit order
+  for(size_t i = 0; i < ax25frameBuffLen; i++) 
+  {
+      ax25frameBuff[i] = reflect(ax25frameBuff[i], 8);
+  }
+
+  // Set pointer to easily track AX.25 frame
+  uint8_t* frameBuffPtr = ax25frameBuff;
+
+  // get destination callsign - all address field bytes are shifted by one bit to make room for HDLC address extension bit
+  for(size_t i = 0; i < strlen(ax25frame->destCallsign); i++) 
+  {
+    ax25frame->destCallsign[i]= *(frameBuffPtr + i) >> 1;
+  }
+  frameBuffPtr += RADIOLIB_AX25_MAX_CALLSIGN_LEN;
+
+  // get destination SSID
+  ax25frame->destSSID = *(frameBuffPtr++) >> 1;
+
+  // get source callsign - all address field bytes are shifted by one bit to make room for HDLC address extension bit
+  for(size_t i = 0; i < strlen(ax25frame->srcCallsign); i++) 
+  {
+    ax25frame->srcCallsign[i] = *(frameBuffPtr + i) >> 1;
+  }
+  frameBuffPtr += RADIOLIB_AX25_MAX_CALLSIGN_LEN;
+
+  // get source SSID
+  ax25frame->srcSSID = *(frameBuffPtr++) >> 1;
+
+  // get sequence numbers of the frames that have it
+  uint8_t controlField = *(frameBuffPtr++);
+  if((controlField & 0x01) == 0) {
+      // information frame, set both sequence numbers
+      ax25frame->rcvSeqNumber = controlField >> 5;
+      ax25frame->sendSeqNumber = controlField >> 1;
+  } else if((controlField & 0x02) == 0) {
+      // supervisory frame, set only receive sequence number
+      ax25frame->rcvSeqNumber = controlField >> 5;
+  }
+
+  // get PID field of the frames that have it
+  if(*(frameBuffPtr++) != 0x00) {
+      ax25frame->protocolID = *(frameBuffPtr++);
+  }
+
+  // get info field of the frames that have it
+  memcpy(ax25frame->info, frameBuffPtr, ax25frameBuffLen - ((2*(RADIOLIB_AX25_MAX_CALLSIGN_LEN + 1)) + 1 + 1));
 }
 
 uint32_t checksum(ax25frame_t* ax25frame, uint8_t* buff, size_t len) {

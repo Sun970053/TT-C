@@ -101,6 +101,13 @@
 */
 #define RADIOLIB_ERR_INVALID_REPEATER_CALLSIGN                  (-803)
 
+/*!
+  \brief The receiving CRC checksum is wrong.
+
+  The length of CRC is 2 bytes.
+*/
+#define RADIOLIB_ERR_RX_CRC_CHECKSUM                            (-808)
+
 // CCITT CRC properties (used by AX.25)
 #define RADIOLIB_CRC_CCITT_POLY                                 (0x1021)
 #define RADIOLIB_CRC_CCITT_INIT                                 (0xFFFF)
@@ -159,8 +166,8 @@ ax25receiveframe_t* createAX25ReceiveFrame(uint8_t control, uint8_t protocolID, 
 void deleteAX25SendFrame(ax25frame_t* ax25frame);
 void deleteAX25ReceiveFrame(ax25frame_t* ax25frame);
 void initCRC(ax25frame_t* ax25frame);
-uint8_t* AX25Frame_HDLC_Generator(ax25sendframe_t* ax25frame, uint16_t* stuffedFrameLen);
-uint8_t AX25Frame_HDLC_Parser(ax25receiveframe_t* ax25frame , uint8_t* inputStuffedFrame, uint16_t* inputStuffedFrameLen);
+uint16_t AX25Frame_HDLC_Generator(ax25sendframe_t* ax25frame, uint16_t* stuffedFrameLen);
+uint16_t AX25Frame_HDLC_Parser(ax25receiveframe_t* ax25frame , uint8_t* inputStuffedFrame, uint16_t* inputStuffedFrameLen);
 void ax25_nrzi_encode(uint8_t* input, uint8_t* output, uint16_t len);
 void ax25_nrzi_decode(uint8_t* input, uint8_t* output, uint16_t len);
 void ax25_g3ruh_scrambler_init(uint32_t tap_mask);
