@@ -162,16 +162,16 @@ typedef struct
 }ax25frame_t;
 
 ax25sendframe_t* createAX25SendFrame(const char* destCallsign, uint8_t destSSID, const char* srcCallsign, uint8_t srcSSID, uint8_t control, uint8_t protocolID, uint8_t* info, uint16_t infoLen, uint16_t preLen);
-ax25receiveframe_t* createAX25ReceiveFrame(uint8_t control, uint8_t protocolID,  uint16_t preLen);
+ax25receiveframe_t* createAX25ReceiveFrame(const char* destCallsign, uint8_t destSSID, const char* srcCallsign, uint8_t srcSSID, uint8_t control, uint8_t protocolID,  uint16_t preLen);
 void deleteAX25SendFrame(ax25frame_t* ax25frame);
 void deleteAX25ReceiveFrame(ax25frame_t* ax25frame);
 void initCRC(ax25frame_t* ax25frame);
-uint16_t AX25Frame_HDLC_Generator(ax25sendframe_t* ax25frame, uint16_t* stuffedFrameLen);
-uint16_t AX25Frame_HDLC_Parser(ax25receiveframe_t* ax25frame , uint8_t* inputStuffedFrame, uint16_t* inputStuffedFrameLen);
+uint16_t AX25Frame_HDLC_Generator(ax25frame_t* ax25frame, uint8_t** pStuffedFrame, uint16_t* stuffedFrameLen);
+uint16_t AX25Frame_HDLC_Parser(ax25frame_t* ax25frame , uint8_t* stuffedFrame, uint16_t stuffedFrameLen);
 void ax25_nrzi_encode(uint8_t* input, uint8_t* output, uint16_t len);
 void ax25_nrzi_decode(uint8_t* input, uint8_t* output, uint16_t len);
 void ax25_g3ruh_scrambler_init(uint32_t tap_mask);
 void ax25_g3ruh_scrambler(uint8_t* unscrambled, uint8_t* scrambled, uint16_t len);
-void ax25_g3ruh_descrambler(int8_t* scrambled, uint8_t* unscrambled, uint16_t len);
+void ax25_g3ruh_descrambler(uint8_t* scrambled, uint8_t* unscrambled, uint16_t len);
 
 #endif

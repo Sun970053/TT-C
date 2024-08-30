@@ -65,6 +65,7 @@ PUTCHAR_PROTOTYPE
 
 si4463_t si4463;
 bool txFlag = false;
+ax25frame_t ax25frame;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -170,7 +171,7 @@ int main(void)
 	else
 		printf("Si4463 init .. fail ! error code: %d\r\n", res);
 
-	res = si4463_setTxPower(&si4463, 10);
+	res = si4463_setTxPower(&si4463, 127);
 	if(res == SI4463_OK)
 	{
 		printf("Set Tx power .. ok !\r\n");
@@ -179,19 +180,22 @@ int main(void)
 	else
 		printf("Si4463 init .. fail ! error code: %d\r\n", res);
 
-	res = si4463_setFrequency(&si4463, 434000000);
+	res = si4463_setFrequency(&si4463, 433000000);
 
 	res = si4463_setTxModulation(&si4463, MOD_2GFSK);
 
 	res = si4463_setTxDataRate(&si4463, DR_9600);
 
 	uint8_t control = RADIOLIB_AX25_CONTROL_U_UNNUMBERED_INFORMATION | RADIOLIB_AX25_CONTROL_POLL_FINAL_DISABLED | RADIOLIB_AX25_CONTROL_UNNUMBERED_FRAME;
-	ax25frame_t* ax25frame = createAX25Frame("STARL", 0, "NCKU", 0, control, RADIOLIB_AX25_PID_NO_LAYER_3, (uint8_t*)"What is 'X' SATORO ?", strlen("What is 'X' SATORO ?"), 8);
-	uint16_t txLen = 0;
-	uint8_t* txData = AX25Frame_HDLC_Generator(ax25frame, &txLen);
-
+	ax25sendframe_t* ax25sendframe = createAX25SendFrame("STARL", 0, "NCKU", 0, control, RADIOLIB_AX25_PID_NO_LAYER_3, (uint8_t*)"What is 'X' SATORO ?What ?", strlen("What is 'X' SATORO ?What ?"), 8);
+	ax25frame.ax25SendFrame = ax25sendframe;
+	uint16_t hdlcLen = 0;
+	uint8_t* hdlcbuff;
+	AX25Frame_HDLC_Generator(&ax25frame, &hdlcbuff, &hdlcLen);
+	ax25_nrzi_encode(hdlcbuff, hdlcbuff, hdlcLen);
 	ax25_g3ruh_scrambler_init(0x21000UL);
-	ax25_g3ruh_scrambler(txData, txData, txLen);
+	ax25_g3ruh_scrambler(hdlcbuff, hdlcbuff, hdlcLen);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -200,14 +204,14 @@ int main(void)
   {
 	  if(txFlag)
 	  {
-		  res = si4463_transmit(&si4463, txData, txLen, STATE_NO_CHANGE);
+		  res = si4463_transmit(&si4463, hdlcbuff, hdlcLen, STATE_NO_CHANGE);
 		  if(res == SI4463_OK)
 		  {
 			  printf("Si4463 Transmit .. ok !\r\n");
 			  printf("Packet: ");
-			  for(int i = 0; i < txLen; i++)
+			  for(int i = 0; i < hdlcLen; i++)
 			  {
-				  printf("0x%02x ", txData[i]);
+				  printf("0x%02x ", hdlcbuff[i]);
 			  }
 			  printf("\r\n");
 		  }
@@ -250,12 +254,12 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 40;
+  RCC_OscInitStruct.PLL.PLLN = 20;
   RCC_OscInitStruct.PLL.PLLP = 2;
-  RCC_OscInitStruct.PLL.PLLQ = 5;
+  RCC_OscInitStruct.PLL.PLLQ = 2;
   RCC_OscInitStruct.PLL.PLLR = 2;
   RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
-  RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
+  RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOMEDIUM;
   RCC_OscInitStruct.PLL.PLLFRACN = 0;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
@@ -269,13 +273,13 @@ void SystemClock_Config(void)
                               |RCC_CLOCKTYPE_D3PCLK1|RCC_CLOCKTYPE_D1PCLK1;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.SYSCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB3CLKDivider = RCC_APB3_DIV2;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_APB1_DIV4;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV2;
   RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
   {
     Error_Handler();
   }
@@ -304,7 +308,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;

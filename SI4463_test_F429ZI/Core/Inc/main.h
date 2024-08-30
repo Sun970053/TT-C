@@ -69,6 +69,8 @@ void Error_Handler(void);
 #define SDN_GPIO_Port GPIOC
 #define GPIO1_Pin GPIO_PIN_0
 #define GPIO1_GPIO_Port GPIOB
+#define GPIO0_Pin GPIO_PIN_1
+#define GPIO0_GPIO_Port GPIOB
 #define LD3_Pin GPIO_PIN_13
 #define LD3_GPIO_Port GPIOG
 #define LD4_Pin GPIO_PIN_14

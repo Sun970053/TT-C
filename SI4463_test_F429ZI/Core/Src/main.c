@@ -28,6 +28,7 @@
 #include <string.h>
 #include "si4463_huang.h"
 #include "ax25_huang.h"
+#include "morse_huang.h"
 #include "HashTable.h"
 /* USER CODE END Includes */
 
@@ -82,6 +83,7 @@
 SPI_HandleTypeDef hspi1;
 
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart2;
 
@@ -102,7 +104,7 @@ typedef struct
 {
 	uint8_t temp[30];
 	uint8_t cmd[10];
-	uint8_t param[30];
+	uint8_t param[50];
 	uint8_t param2[30];
 	uint8_t cmdLen;
 	uint8_t paramLen;
@@ -112,8 +114,13 @@ rxCmd myRxCmd;
 uint8_t pos = 0;
 uint8_t rxData = 0;
 volatile uint8_t uartFlag = 0;
+volatile uint8_t strFlag = 0;
 volatile uint8_t cmdFlag = 0;
 volatile uint8_t rxFlag = 0;
+
+/* -----AX.25 Frame ----- */
+ax25frame_t ax25frame;
+morse_t morse;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -122,6 +129,7 @@ static void MX_GPIO_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 void si4463MenuDisplay(void);
 void initHashTable(void);
@@ -132,8 +140,13 @@ uint8_t si4463_SPI_CheckState(void);
 void si4463_DelayUs(uint32_t delay);
 void si4463_setNSEL(bool val);
 void si4463_setSDN(bool val);
+void si4463_setOOK(bool val);
 bool si4463_getIRQ(void);
 bool si4463_getGPIO1(void);
+
+void morse_resetToNow(timerange_t*);
+uint32_t morse_millisecondsElapsed(timerange_t*);
+uint32_t morse_secondsElapsed(timerange_t*);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -149,7 +162,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		{
 		case ' ':
 			// first space
-			if(uartFlag == 0)
+			if(uartFlag == 0 && strFlag == 0)
 			{
 				// clear array
 				if(myRxCmd.cmdLen)
@@ -157,9 +170,12 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 				memcpy(myRxCmd.cmd, myRxCmd.temp, pos + 1);
 				memset(myRxCmd.temp, '\0', pos + 1);
 				myRxCmd.cmdLen = pos + 1;
+				pos = 0;
+				uartFlag++;
+				printf(" ");
 			}
 			// second space
-			else if(uartFlag == 1)
+			else if(uartFlag == 1 && strFlag == 0)
 			{
 				// clear array
 				if(myRxCmd.paramLen)
@@ -167,10 +183,25 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 				memcpy(myRxCmd.param, myRxCmd.temp, pos + 1);
 				memset(myRxCmd.temp, '\0', pos + 1);
 				myRxCmd.paramLen = pos + 1;
+				pos = 0;
+				uartFlag++;
+				printf(" ");
 			}
-			pos = 0;
-			uartFlag++;
-			printf(" ");
+			if(strFlag == 1)
+			{
+				myRxCmd.temp[pos] = rxData;
+				pos++;
+				printf(" ");
+			}
+
+			break;
+		case '\"':
+			if(uartFlag == 1)
+			{
+				if(strFlag) strFlag = 0;
+				else strFlag = 1;
+				printf("\"");
+			}
 			break;
 		case '\r':
 			// two parameter
@@ -236,6 +267,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   */
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -261,9 +293,11 @@ int main(void)
   MX_SPI1_Init();
   MX_USART2_UART_Init();
   MX_TIM1_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_TIM_Base_Start(&htim1); // us delay timer
+  HAL_TIM_Base_Start(&htim2); // us delay timer
 
   HAL_UART_Receive_IT(&huart2,(uint8_t*)&rxData,1); // Enabling interrupt receive again
     //HAL_I2C_Slave_Receive_IT(&hi2c1, isr_rxData, SLAVE_RX_BUFFER_SIZE);
@@ -277,11 +311,15 @@ int main(void)
 	si4463.DelayUs = si4463_DelayUs;
 	si4463.NSEL = si4463_setNSEL;
 	si4463.SDN = si4463_setSDN;
+	si4463.OOK = si4463_setOOK;
 	si4463.gpios.IRQ = si4463_getIRQ;
 	si4463.gpios.GPIO1 = si4463_getGPIO1;
 	si4463.gpios.gpio_low = GPIO_PIN_RESET;
 	si4463.gpios.gpio_high = GPIO_PIN_SET;
 
+	morse.time.resetToNow = morse_resetToNow;
+	morse.time.millisecondsElapsed = morse_millisecondsElapsed;
+	morse.time.secondsElapsed = morse_secondsElapsed;
 	//HAL_NVIC_DisableIRQ(EXTI4_IRQn);
 	/* Initialize si4463 */
 	int res = si4463_init(&si4463);
@@ -293,50 +331,70 @@ int main(void)
 	si4463_getPartInfo(&si4463);
 	si4463_getFuncInfo(&si4463);
 
-//	res = si4463_setTxPower(&si4463, 10);
-//	if(res == SI4463_OK)
-//	{
-//		printf("Set Tx power .. ok !\r\n");
-//		printf("Get Tx power %d \r\n", si4463_getTxPower(&si4463));
-//	}
-//	else
-//		printf("Set Tx power .. fail ! error code: %d\r\n", res);
-//
-//
-//	res = si4463_setFrequency(&si4463, 434000000);
-//	if(res == SI4463_OK)
-//	{
-//		printf("Set frequency .. ok !\r\n");
-//		printf("Get frequency %ld \r\n", si4463_getFrequency(&si4463));
-//	}
-//	else
-//		printf("Set frequency .. fail ! error code: %d\r\n", res);
-//
-//	res = si4463_setTxModulation(&si4463, MOD_2GFSK);
-//	if(res == SI4463_OK)
-//	{
-//		printf("Set modulation .. ok !\r\n");
-//		printf("Get modulation %d \r\n", si4463_getModulation(&si4463));
-//	}
-//	else
-//		printf("Set modulation .. fail ! error code: %d\r\n", res);
-//
-//	res = si4463_setTxDataRate(&si4463, DR_2400);
-//	if(res == SI4463_OK)
-//	{
-//		printf("Set data Rate .. ok !\r\n");
-//		printf("Get data Rate %d \r\n", si4463_getDataRate(&si4463));
-//	}
-//	else
-//		printf("Set data Rate .. fail ! error code: %d\r\n", res);
+	/* Functional test: Packet generator send data to packet parser.
+	 * AX.25 -> HDLC -> NRZI -> G3RUH
+	 * G3RUH -> NRZI -> HDLC -> AX.25*/
+	char testInfo[] = "What is 'X' SATORO ??";
+	uint8_t control = RADIOLIB_AX25_CONTROL_U_UNNUMBERED_INFORMATION | RADIOLIB_AX25_CONTROL_POLL_FINAL_DISABLED | RADIOLIB_AX25_CONTROL_UNNUMBERED_FRAME;
+	ax25sendframe_t* testsendframe = createAX25SendFrame("STARL", 0, "NCKU", 0, control, RADIOLIB_AX25_PID_NO_LAYER_3, (uint8_t*)testInfo, strlen(testInfo), 8);
+	ax25frame.ax25SendFrame = testsendframe;
+	uint16_t testhdlcLen = 0;
+	uint8_t* testhdlcbuff;
+	uint8_t pres = AX25Frame_HDLC_Generator(&ax25frame, &testhdlcbuff, &testhdlcLen);
+	if(!pres)
+	{
+		printf("Generate AX.25 frame .. success ! \r\n");
+		printf("AX.25/HDLC frame\r\n");
+		printf("packet: ");
+		for(int i = 0; i <  testhdlcLen; i++)
+			printf("0x%02x ", testhdlcbuff[i]);
+		printf("\r\n");
+	}
+	else
+		printf("Generate AX.25 frame .. fail ! \r\n");
+	ax25_nrzi_encode(testhdlcbuff, testhdlcbuff, testhdlcLen);
+	printf("NRZI encode\r\n");
+	printf("packet: ");
+	for(int i = 0; i <  testhdlcLen; i++)
+		printf("0x%02x ", testhdlcbuff[i]);
+	printf("\r\n");
+	ax25_g3ruh_scrambler_init(0x21000UL);
+	ax25_g3ruh_scrambler(testhdlcbuff, testhdlcbuff, testhdlcLen);
+	printf("G3RUH scramble\r\n");
+	printf("packet: ");
+	for(int i = 0; i <  testhdlcLen; i++)
+		printf("0x%02x ", testhdlcbuff[i]);
+	printf("\r\n");
 
+	ax25_g3ruh_scrambler_init(0x21000UL);
+	ax25_g3ruh_descrambler(testhdlcbuff, testhdlcbuff, testhdlcLen);
+	printf("G3RUH descramble\r\n");
+	printf("packet: ");
+	for(int i = 0; i <  testhdlcLen; i++)
+		printf("0x%02x ", testhdlcbuff[i]);
+	printf("\r\n");
 
-//	res = si4463_initRx(&si4463, 0, STATE_RX, STATE_RX, STATE_RX);
-//	if(res == SI4463_OK)
-//		printf("Start Rx .. ok !\r\n");
-//	else
-//		printf("Start Rx .. fail ! error code: %d\r\n", res);
+	ax25_nrzi_decode(testhdlcbuff, testhdlcbuff, testhdlcLen);
+	printf("NRZI decode\r\n");
+	printf("packet: ");
+	for(int i = 0; i <  testhdlcLen; i++)
+		printf("0x%02x ", testhdlcbuff[i]);
+	printf("\r\n");
 
+	ax25receiveframe_t* testrcvframe = createAX25ReceiveFrame("STARL", 0, "NCKU", 0, control, RADIOLIB_AX25_PID_NO_LAYER_3, 8);
+	ax25frame.ax25RcvFrame = testrcvframe;
+
+	pres = AX25Frame_HDLC_Parser(&ax25frame, testhdlcbuff, testhdlcLen);
+	if(!pres)
+		printf("Parse AX.25 frame .. success ! \r\n");
+	else
+		printf("Parse AX.25 frame .. fail !  CRC Error !\r\n");
+
+	printf("AX.25/HDLC frame information:\r\n");
+	printf("From %s to %s ", ax25frame.ax25RcvFrame->srcCallsign, ax25frame.ax25RcvFrame->destCallsign);
+	printf("<Control: %d, PID: %02X, Length: %d> \r\n", ax25frame.ax25RcvFrame->control, ax25frame.ax25RcvFrame->protocolID, ax25frame.ax25RcvFrame->infoLen);
+	printf("Message: %s \r\n", ax25frame.ax25RcvFrame->info);
+	printf("\r\n");
 	//HAL_NVIC_EnableIRQ(EXTI4_IRQn);
 	uint8_t rxDataLen = 0;
 	uint8_t rxData[100] = {0};
@@ -360,6 +418,7 @@ int main(void)
 			{
 				rxDataLen = res;
 				res = si4463_receive(&si4463, rxData, rxDataLen);
+
 				if(res == SI4463_OK)
 				{
 					printf("Receive .. ok !\r\n");
@@ -370,6 +429,23 @@ int main(void)
 					}
 					printf("\r\n");
 					memset(rxData, '\0', rxDataLen);
+
+//					ax25_g3ruh_descrambler(rxData, rxData, rxDataLen);
+//					ax25_nrzi_decode(rxData, rxData, rxDataLen);
+//					ax25receiveframe_t* rcvframe = createAX25ReceiveFrame("STARL", 0, "NCKU", 0, control, RADIOLIB_AX25_PID_NO_LAYER_3, 8);
+//					ax25frame.ax25RcvFrame = rcvframe;
+//
+//					pres = AX25Frame_HDLC_Parser(&ax25frame, rxData, rxDataLen);
+//					if(!pres)
+//						printf("Parse AX.25 frame .. success ! \r\n");
+//					else
+//						printf("Parse AX.25 frame .. fail !  CRC Error !\r\n");
+//
+//					printf("AX.25/HDLC frame information:\r\n");
+//					printf("From %s to %s ", ax25frame.ax25RcvFrame->srcCallsign, ax25frame.ax25RcvFrame->destCallsign);
+//					printf("<Control: %d, PID: %02X, Length: %d> \r\n", ax25frame.ax25RcvFrame->control, ax25frame.ax25RcvFrame->protocolID, ax25frame.ax25RcvFrame->infoLen);
+//					printf("Message: %s \r\n", ax25frame.ax25RcvFrame->info);
+//					printf("\r\n");
 
 				}
 				else
@@ -409,25 +485,52 @@ int main(void)
 		case CMD_TX:
 			if(myRxCmd.paramLen > 0)
 			{
-
-				uint8_t control = RADIOLIB_AX25_CONTROL_U_UNNUMBERED_INFORMATION | RADIOLIB_AX25_CONTROL_POLL_FINAL_DISABLED | RADIOLIB_AX25_CONTROL_UNNUMBERED_FRAME;
-				ax25frame_t* ax25frame = createAX25Frame("STARL", 0, "NCKU", 0, control, RADIOLIB_AX25_PID_NO_LAYER_3, (uint8_t*)myRxCmd.param, myRxCmd.paramLen, 8);
-				uint16_t txLen = 0;
-				uint8_t* txData = AX25Frame_HDLC_Generator(ax25frame, &txLen);
-
-				ax25_g3ruh_scrambler_init(0x21000UL);
-				ax25_g3ruh_scrambler(txData, txData, txLen);
-				res = si4463_transmit(&si4463, txData, txLen, STATE_NO_CHANGE);
-				if(res == SI4463_OK)
+				if(si4463.settings.txMod != MOD_OOK)
 				{
-					printf("Si4463 Transmit .. ok !\r\n");
-					printf("packet: ");
-					for(int i = 0; i <  txLen; i++)
-						printf("0x%02x ", txData[i]);
-					printf("\r\n");
+					uint8_t control = RADIOLIB_AX25_CONTROL_U_UNNUMBERED_INFORMATION | RADIOLIB_AX25_CONTROL_POLL_FINAL_DISABLED | RADIOLIB_AX25_CONTROL_UNNUMBERED_FRAME;
+					ax25sendframe_t* ax25sendframe = createAX25SendFrame("STARL", 0, "NCKU", 0, control, RADIOLIB_AX25_PID_NO_LAYER_3, (uint8_t*)myRxCmd.param, myRxCmd.paramLen - 1, 8);
+					ax25frame.ax25SendFrame = ax25sendframe;
+					uint16_t hdlcLen = 0;
+					uint8_t* hdlcbuff;
+					uint8_t pres = AX25Frame_HDLC_Generator(&ax25frame, &hdlcbuff, &hdlcLen);
+					if(!pres)
+					{
+						ax25_nrzi_encode(hdlcbuff, hdlcbuff, hdlcLen);
+						ax25_g3ruh_scrambler_init(0x21000UL);
+						ax25_g3ruh_scrambler(hdlcbuff, hdlcbuff, hdlcLen);
+
+						res = si4463_transmit(&si4463, hdlcbuff, hdlcLen, STATE_NO_CHANGE);
+						if(res == SI4463_OK)
+						{
+							printf("Si4463 Transmit .. ok !\r\n");
+							printf("packet: ");
+							for(int i = 0; i <  hdlcLen; i++)
+								printf("0x%02x ", hdlcbuff[i]);
+							printf("\r\n");
+						}
+						else
+							printf("Si4463 Transmit .. fail ! error code: %d\r\n", res);
+					}
+					else
+					{
+						printf("Tx error ! error code: %d", pres);
+					}
 				}
+				// OOK transmission
 				else
-					printf("Si4463 Transmit .. fail ! error code: %d\r\n", res);
+				{
+					morse_setText(&morse, (char*)myRxCmd.param);
+					morse_start(&morse);
+					si4463_startTx(&si4463, 0, STATE_NO_CHANGE);
+					while(morse.currentState != msEndOfText)
+					{
+						// We give CPU time to morse subsystem.
+						morse_handleTimeout(&morse);
+						bool toneOn = morse_isToneActive(&morse);
+						si4463_controlOOK(&si4463, toneOn);
+					}
+					printf("Sending Morse code.. Complete !\r\n");
+				}
 			}
 			else
 			{
@@ -895,6 +998,51 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 90-1;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 4294967295;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -953,6 +1101,9 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(SDN_GPIO_Port, SDN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIO0_GPIO_Port, GPIO0_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOG, LD3_Pin|LD4_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : B1_Pin */
@@ -986,6 +1137,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIO1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : GPIO0_Pin */
+  GPIO_InitStruct.Pin = GPIO0_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIO0_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LD3_Pin LD4_Pin */
   GPIO_InitStruct.Pin = LD3_Pin|LD4_Pin;
@@ -1046,6 +1204,14 @@ void si4463_setSDN(bool val)
 		HAL_GPIO_WritePin(SDN_GPIO_Port, SDN_Pin, GPIO_PIN_SET);
 	else
 		HAL_GPIO_WritePin(SDN_GPIO_Port, SDN_Pin, GPIO_PIN_RESET);
+}
+
+void si4463_setOOK(bool val)
+{
+	if(val == true)
+		HAL_GPIO_WritePin(GPIO0_GPIO_Port, GPIO0_Pin, GPIO_PIN_SET);
+	else
+		HAL_GPIO_WritePin(GPIO0_GPIO_Port, GPIO0_Pin, GPIO_PIN_RESET);
 }
 
 bool si4463_getIRQ(void)
@@ -1129,6 +1295,31 @@ void initHashTable(void)
 
 	printf("Search Key %s: Value %d \r\n", "check", HT_searchKey(ht, "check"));
 }
+
+void morse_resetToNow(timerange_t* time)
+{
+	time->stamp = __HAL_TIM_GET_COUNTER(&htim2);
+}
+
+uint32_t morse_millisecondsElapsed(timerange_t* time)
+{
+	uint32_t current = __HAL_TIM_GET_COUNTER(&htim2);
+	if(time->stamp < current)
+	{
+		return current - time->stamp;
+	}
+	// unsigned integer overflow
+	else
+	{
+		return UINT32_MAX - (time->stamp - current);
+	}
+}
+
+uint32_t morse_secondsElapsed(timerange_t* time)
+{
+	return morse_millisecondsElapsed(time)/1000;
+}
+
 /* USER CODE END 4 */
 
 /**

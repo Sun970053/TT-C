@@ -1,0 +1,10 @@
+../Si4463_driver/src/morse_huang.c:64:6:morse_setText	24	static
+../Si4463_driver/src/morse_huang.c:74:6:morse_handleTimeout	16	static
+../Si4463_driver/src/morse_huang.c:88:13:morse_prepareNextChar	32	static
+../Si4463_driver/src/morse_huang.c:130:13:morse_prepareNextDitDah	24	static
+../Si4463_driver/src/morse_huang.c:143:6:morse_findCharInTable	40	static
+../Si4463_driver/src/morse_huang.c:164:6:morse_changeStateByTimeout	24	static
+../Si4463_driver/src/morse_huang.c:219:9:morse_getTimeoutForState	24	static
+../Si4463_driver/src/morse_huang.c:259:6:morse_isToneActive	16	static
+../Si4463_driver/src/morse_huang.c:266:6:morse_start	24	static
+../Si4463_driver/src/morse_huang.c:273:6:morse_stop	16	static
